@@ -9,19 +9,16 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
         
-      # --- مرحله 1: نصب Deno (موتور جاوااسکریپت) ---
-      - name: Setup Deno (JavaScript Runtime)
+      - name: Setup Deno (JavaScript Runtime for yt-dlp)
         run: |
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
         
-      # --- مرحله 2: نصب ffmpeg و yt-dlp با نصب کامل ---
-      - name: Install ffmpeg and yt-dlp (با تمام امکانات)
+      - name: Install ffmpeg, yt-dlp, and bc
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg bc
           pip3 install --upgrade pip
-          # نصب با گزینه [default] برای اطمینان از وجود اسکریپت‌های EJS
           pip3 install "yt-dlp[default]"
           
       - name: Create cookies file from Secret
@@ -38,19 +35,18 @@ jobs:
           git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
-          
-          # دستور دانلود با مشخص کردن مسیر Deno (اختیاری)
           yt-dlp --cookies cookies.txt --config-location config.txt
-        
-      - name: Split large files with ffmpeg (اختیاری)
+          
+      - name: Split large video files (max 95MB per chunk) BEFORE commit
         run: |
+          # تابع تقسیم فایل‌های ویدیویی بزرگتر از 95MB
           split_video_by_size() {
             local input_file="$1"
-            local max_size_mb=1900
+            local max_size_mb=95   # کمی کمتر از 100 مگابایت برای اطمینان
             local file_size_mb=$(($(stat -c%s "$input_file") / 1048576))
             
             if [ $file_size_mb -le $max_size_mb ]; then
-              echo "✅ $input_file (${file_size_mb}MB) نیاز به تقسیم ندارد."
+              echo "✅ $input_file (${file_size_mb}MB) نیازی به تقسیم ندارد."
               return 0
             fi
             
@@ -61,22 +57,25 @@ jobs:
             local name_without_ext="${base_name%.*}"
             local ext="${base_name##*.}"
             
-            # دریافت مدت زمان و بیت‌ریت برای محاسبه زمان هر قطعه
+            # دریافت مدت زمان و بیت‌ریت
             local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
             local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
             
             if [ -z "$bitrate" ] || [ "$bitrate" -eq 0 ]; then
+              # تخمین بیت‌ریت از روی حجم و مدت زمان (بیت بر ثانیه)
               local avg_bitrate=$(( ($(stat -c%s "$input_file") * 8) / ${duration%.*} ))
             else
               local avg_bitrate=$bitrate
             fi
             
             local max_size_bytes=$((max_size_mb * 1048576))
+            # مدت زمان مجاز برای هر قطعه بر حسب ثانیه
             local chunk_duration=$(echo "scale=0; ($max_size_bytes * 8) / $avg_bitrate" | bc)
             [ "$chunk_duration" -lt 30 ] && chunk_duration=30
             
             echo "محاسبه: هر قطعه حدود $chunk_duration ثانیه"
             
+            # تقسیم با ffmpeg (کپی کدک، بدون افت کیفیت)
             ffmpeg -i "$input_file" -c copy -map 0 -segment_time $chunk_duration -f segment -reset_timestamps 1 \
               "${dir_name}/${name_without_ext}_part%03d.${ext}"
             
@@ -85,22 +84,24 @@ jobs:
               rm "$input_file"
             else
               echo "❌ خطا در تقسیم $input_file"
+              return 1
             fi
           }
           
           export -f split_video_by_size
           
-          find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+          # اجرای تابع روی همه فایل‌های ویدیویی (mp4, mkv, webm, avi)
+          find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.avi" \) -print0 | while IFS= read -r -d '' file; do
             split_video_by_size "$file"
           done
           
-      - name: Commit and push changes
+      - name: Commit and push only after splitting
         run: |
           git config --local user.email "your-email@example.com"
           git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با Deno)" || echo "تغییری برای commit وجود ندارد"
+          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با Deno و تقسیم به قطعات 95MB)" || echo "No changes to commit"
           rm -f cookies.txt
           git push
