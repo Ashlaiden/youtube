@@ -1,109 +1,98 @@
 name: ci
-
 on: [push, pull_request]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
-
     steps:
       - name: Clone repository
-        uses: actions/checkout@v4   # نسخه جدید برای رفع هشدار Node.js
-
-      - name: Install dependencies (yt-dlp + ffmpeg)
+        uses: actions/checkout@v4
+        
+      - name: نصب yt-dlp و ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip ffmpeg
           pip3 install yt-dlp
-
-      - name: Download videos using yt-dlp and config.txt
+          
+      - name: ساخت فایل کوکی از Secret
         run: |
-          # اطمینان از وجود پوشه downloads
-          mkdir -p downloads
-          # اجرای yt-dlp با تنظیمات config.txt
-          # توجه: در config.txt شما خط --batch-file playlist.txt وجود دارد
-          yt-dlp --config-location config.txt
-
-      - name: Split large video files into smaller chunks (max 1.9GB per part)
+          echo "${{ secrets.YT_COOKIES }}" > cookies.txt
+          if [ ! -s cookies.txt ]; then
+            echo "❌ فایل کوکی خالی است!"
+            exit 1
+          fi
+          
+      - name: دانلود ویدیو با yt-dlp
         run: |
-          # تابع برای تقسیم یک فایل ویدیویی با استفاده از ffmpeg (کپی کدک)
-          split_video() {
+          git config --local user.email "your-email@example.com"   # تغییر دهید
+          git config --local user.name "your-username"             # تغییر دهید
+          git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git pull --rebase
+          
+          yt-dlp --cookies cookies.txt --config-location config.txt
+          
+      - name: تقسیم فایل‌های بزرگ (بزرگتر از 1.9 گیگابایت) با ffmpeg
+        run: |
+          # تابع تقسیم ویدیو بر اساس حجم
+          split_video_by_size() {
             local input_file="$1"
-            local max_size_mb=1900   # حداکثر حجم هر قطعه (کمتر از 2GB محدودیت گیت‌هاب)
-            local temp_dir=$(mktemp -d)
+            local max_size_mb=1900
+            local file_size_mb=$(($(stat -c%s "$input_file") / 1048576))
             
-            # دریافت اطلاعات فایل
-            local file_size_bytes=$(stat -c%s "$input_file")
-            local file_size_mb=$((file_size_bytes / 1048576))
-            
-            # اگر حجم کمتر از حد مجاز است، نیازی به تقسیم نیست
             if [ $file_size_mb -le $max_size_mb ]; then
-              echo "Skipping $input_file (size ${file_size_mb}MB <= ${max_size_mb}MB)"
+              echo "✅ $input_file (${file_size_mb}MB) نیاز به تقسیم ندارد."
               return 0
             fi
             
-            echo "Splitting $input_file (${file_size_mb}MB) into chunks of max ${max_size_mb}MB"
+            echo "⚠️  $input_file (${file_size_mb}MB) بزرگتر از ${max_size_mb}MB است. در حال تقسیم..."
             
-            # دریافت مدت زمان کل و بیت‌ریت با ffprobe
+            local dir_name=$(dirname "$input_file")
+            local base_name=$(basename "$input_file")
+            local name_without_ext="${base_name%.*}"
+            local ext="${base_name##*.}"
+            
+            # دریافت مدت زمان و بیت‌ریت برای محاسبه زمان هر قطعه
             local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
             local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
             
-            # اگر بیت‌ریت دریافت نشد (مثلاً متغیر باشد)، از فرمول تقریبی استفاده می‌کنیم
             if [ -z "$bitrate" ] || [ "$bitrate" -eq 0 ]; then
-              # تخمین بیت‌ریت از روی حجم و مدت زمان (بایت بر ثانیه)
-              local avg_bitrate=$((file_size_bytes * 8 / ${duration%.*}))  # بیت بر ثانیه
+              local avg_bitrate=$(( ($(stat -c%s "$input_file") * 8) / ${duration%.*} ))
             else
               local avg_bitrate=$bitrate
             fi
             
-            # حداکثر اندازه بر حسب بایت
             local max_size_bytes=$((max_size_mb * 1048576))
-            # مدت زمان مجاز برای هر قطعه (ثانیه) = (حداکثر حجم بر حسب بیت) / (بیت‌ریت)
-            local max_chunk_duration=$(echo "scale=2; ($max_size_bytes * 8) / $avg_bitrate" | bc)
-            # اطمینان از عدد صحیح
-            local chunk_duration=${max_chunk_duration%.*}
-            if [ -z "$chunk_duration" ] || [ "$chunk_duration" -lt 1 ]; then
-              chunk_duration=300  # پیش‌فرض 5 دقیقه
-            fi
+            local chunk_duration=$(echo "scale=0; ($max_size_bytes * 8) / $avg_bitrate" | bc)
+            [ "$chunk_duration" -lt 30 ] && chunk_duration=30
             
-            echo "Average bitrate: $avg_bitrate bps, chunk duration: $chunk_duration seconds"
+            echo "محاسبه: هر قطعه حدود $chunk_duration ثانیه"
             
-            # نام پایه فایل (بدون پسوند و مسیر)
-            local base_name=$(basename "$input_file")
-            local name_without_ext="${base_name%.*}"
-            local dir_name=$(dirname "$input_file")
-            
-            # تقسیم فایل با ffmpeg با استفاده از segment
-            # استفاده از کلید -reset_timestamps برای تنظیم مجدد timestamp هر قطعه
             ffmpeg -i "$input_file" -c copy -map 0 -segment_time $chunk_duration -f segment -reset_timestamps 1 \
-              "${dir_name}/${name_without_ext}_part%03d.${base_name##*.}"
+              "${dir_name}/${name_without_ext}_part%03d.${ext}"
             
-            # اگر قطعات با موفقیت ایجاد شدند، فایل اصلی را حذف کن
             if [ $? -eq 0 ]; then
-              echo "Successfully split $input_file. Removing original file."
+              echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
               rm "$input_file"
             else
-              echo "Failed to split $input_file. Keeping original."
-              return 1
+              echo "❌ خطا در تقسیم $input_file"
             fi
           }
           
-          export -f split_video
+          export -f split_video_by_size
           
-          # پیدا کردن تمام فایل‌های ویدیویی در پوشه downloads (mp4, mkv, avi, ...)
+          # اجرا روی همه فایل‌های ویدیویی در پوشه downloads
           find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
-            split_video "$file"
+            split_video_by_size "$file"
           done
-
-      - name: Commit and push changes (downloaded and split videos)
+          
+      - name: Commit و Push نهایی
         run: |
-          git config --local user.email "justjavac@gmail.com"
-          git config --local user.name "迷渡"
+          git config --local user.email "your-email@example.com"
+          git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود خودکار ویدیوها و تقسیم فایل‌های بزرگ" || echo "No changes to commit"
+          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با کوکی)" || echo "تغییری برای commit وجود ندارد"
+          rm -f cookies.txt
           git push
