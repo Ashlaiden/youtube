@@ -1,0 +1,33 @@
+name: Clean Downloads Folder
+
+on:
+  workflow_dispatch:  # فقط با کلیک دکمه در GitHub Actions اجرا می‌شود
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Remove downloads folder
+        run: |
+          if [ -d downloads ]; then
+            rm -rf downloads
+            echo "✅ پوشه downloads حذف شد."
+          else
+            echo "ℹ️ پوشه downloads وجود نداشت."
+          fi
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "your-email@example.com"
+          git config --local user.name "your-username"
+          git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git pull --rebase
+          git add .
+          git commit -m "پاکسازی پوشه downloads" || echo "No changes to commit"
+          git push
