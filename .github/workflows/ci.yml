@@ -120,13 +120,14 @@ jobs:
             echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
           fi
 
-      - name: Split short videos if needed (same 95MB limit)
+      - name: Split long video files (max 90MB per chunk)
         run: |
           split_video_by_size() {
             local input_file="$1"
             [ ! -f "$input_file" ] && return 0
             local size_mb=$(($(stat -c%s "$input_file") / 1048576))
-            [ $size_mb -le 95 ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+            local max_size_mb=90
+            [ $size_mb -le $max_size_mb ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
             
             echo "⚠️ تقسیم $input_file (${size_mb}MB)"
             local dir=$(dirname "$input_file")
@@ -134,20 +135,22 @@ jobs:
             local name="${base%.*}"
             local ext="${base##*.}"
             
-            local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
-            local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
-            if [ -z "$bitrate" ] || [ "$bitrate" -eq 0 ]; then
-              bitrate=$(( ($(stat -c%s "$input_file") * 8) / ${duration%.*} ))
-            fi
-            local chunk_duration=$(echo "scale=0; (95 * 1048576 * 8) / $bitrate" | bc)
-            [ "$chunk_duration" -lt 30 ] && chunk_duration=30
+            # استفاده از گزینه -fs در ffmpeg برای کنترل دقیق حجم هر قطعه (حداکثر 90 مگابایت)
+            # این روش بسیار دقیق‌تر از محاسبه زمان است
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 30 -reset_timestamps 1 \
+              -fs $(($max_size_mb * 1024 * 1024)) \
+              "${dir}/${name}_part%03d.${ext}" < /dev/null
             
-            ffmpeg -i "$input_file" -c copy -map 0 -segment_time $chunk_duration -f segment -reset_timestamps 1 \
-              "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
+            if [ $? -eq 0 ]; then
+              echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
+              rm -f "$input_file"
+            else
+              echo "❌ خطا در تقسیم $input_file"
+            fi
           }
           export -f split_video_by_size
-          if [ -d downloads/short_videos ]; then
-            find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+          if [ -d downloads/long_videos ]; then
+            find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
               split_video_by_size "$file"
             done
           fi
