@@ -31,19 +31,45 @@ jobs:
             exit 1
           fi
 
+      - name: Split playlist into long and short temporary files
+        run: |
+          # اگر فایل playlist.txt وجود نداشته باشد، خروجی می‌شویم
+          if [ ! -f playlist.txt ]; then
+            echo "⚠️ فایل playlist.txt یافت نشد. لطفاً آن را در ریشه مخزن ایجاد کنید."
+            exit 1
+          fi
+          
+          # پاک کردن فایل‌های موقت قبلی (اگر وجود داشته باشند)
+          rm -f long_temp.txt short_temp.txt
+          
+          # پردازش فایل: هر خط که با #long شروع شود، حالت long فعال می‌شود
+          # با #short حالت short فعال می‌شود. بقیه خطوط (غیرخالی) در حالت جاری ذخیره می‌شوند.
+          awk '
+            /^#long/  { mode = "long"; next }
+            /^#short/ { mode = "short"; next }
+            mode == "long" && NF > 0 { print >> "long_temp.txt" }
+            mode == "short" && NF > 0 { print >> "short_temp.txt" }
+          ' playlist.txt
+          
+          echo "✅ لینک‌های بلند استخراج شده: $(wc -l < long_temp.txt) عدد"
+          echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt) عدد"
+
       # ============================================
       # دسته اول: ویدیوهای بلند (هر ویدیو در یک پوشه مجزا)
       # ============================================
       - name: Download long videos (each in its own folder)
         run: |
-          mkdir -p downloads/long_videos
-          # الگوی خروجی: downloads/long_videos/عنوان ویدیو/عنوان ویدیو_آیدی
-          yt-dlp --cookies cookies.txt \
-            --batch-file long_videos.txt \
-            --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
-            --continue \
-            --restrict-filenames \
-            --merge-output-format mp4
+          if [ -s long_temp.txt ]; then
+            mkdir -p downloads/long_videos
+            yt-dlp --cookies cookies.txt \
+              --batch-file long_temp.txt \
+              --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
+              --continue \
+              --restrict-filenames \
+              --merge-output-format mp4
+          else
+            echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
+          fi
 
       - name: Split long video files (max 95MB per chunk)
         run: |
@@ -71,23 +97,28 @@ jobs:
               "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
           }
           export -f split_video_by_size
-          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
-            split_video_by_size "$file"
-          done
+          if [ -d downloads/long_videos ]; then
+            find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+              split_video_by_size "$file"
+            done
+          fi
 
       # ============================================
       # دسته دوم: ویدیوهای کوتاه (همه در یک پوشه مشترک)
       # ============================================
       - name: Download short videos (all in one folder)
         run: |
-          mkdir -p downloads/short_videos
-          # همه فایل‌های کوتاه مستقیماً در پوشه short_videos ذخیره می‌شوند
-          yt-dlp --cookies cookies.txt \
-            --batch-file short_videos.txt \
-            --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
-            --continue \
-            --restrict-filenames \
-            --merge-output-format mp4
+          if [ -s short_temp.txt ]; then
+            mkdir -p downloads/short_videos
+            yt-dlp --cookies cookies.txt \
+              --batch-file short_temp.txt \
+              --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
+              --continue \
+              --restrict-filenames \
+              --merge-output-format mp4
+          else
+            echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
+          fi
 
       - name: Split short videos if needed (same 95MB limit)
         run: |
@@ -115,9 +146,11 @@ jobs:
               "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
           }
           export -f split_video_by_size
-          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
-            split_video_by_size "$file"
-          done
+          if [ -d downloads/short_videos ]; then
+            find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+              split_video_by_size "$file"
+            done
+          fi
 
       - name: Commit and push all changes
         run: |
@@ -126,6 +159,6 @@ jobs:
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (دسته‌بندی شده)" || echo "No changes to commit"
-          rm -f cookies.txt
+          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (دسته‌بندی از یک فایل)" || echo "No changes to commit"
+          rm -f cookies.txt long_temp.txt short_temp.txt
           git push
