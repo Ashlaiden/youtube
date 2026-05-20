@@ -11,12 +11,12 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
 
-      - name: Setup Deno (JavaScript Runtime for yt-dlp)
+      - name: Setup Deno
         run: |
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-      - name: Install ffmpeg, yt-dlp, and bc
+      - name: Install ffmpeg, yt-dlp, bc
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg bc
@@ -31,98 +31,101 @@ jobs:
             exit 1
           fi
 
-      - name: Download videos with yt-dlp
+      # ============================================
+      # دسته اول: ویدیوهای بلند (هر ویدیو در یک پوشه مجزا)
+      # ============================================
+      - name: Download long videos (each in its own folder)
         run: |
-          git config --local user.email "your-email@example.com"
-          git config --local user.name "your-username"
-          git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git pull --rebase
-          yt-dlp --cookies cookies.txt --config-location config.txt
+          mkdir -p downloads/long_videos
+          # الگوی خروجی: downloads/long_videos/عنوان ویدیو/عنوان ویدیو_آیدی
+          yt-dlp --cookies cookies.txt \
+            --batch-file long_videos.txt \
+            --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
+            --continue \
+            --restrict-filenames \
+            --merge-output-format mp4
 
-      - name: Split large video files (max 95MB per chunk) BEFORE commit
+      - name: Split long video files (max 95MB per chunk)
         run: |
-          # پاکسازی فایل‌های ناقص
-          find downloads -type f -name "*Data Fetching*" -delete 2>/dev/null || true
-          find downloads -type f -size 0 -delete 2>/dev/null || true
-
           split_video_by_size() {
             local input_file="$1"
-            if [ ! -f "$input_file" ]; then
-              echo "⚠️ فایل وجود ندارد: $input_file"
-              return 0
-            fi
-
-            local file_size_bytes=$(stat -c%s "$input_file" 2>/dev/null)
-            if [ -z "$file_size_bytes" ] || [ "$file_size_bytes" -eq 0 ]; then
-              echo "⚠️ حجم فایل نامعتبر: $input_file"
-              return 0
-            fi
-
-            local file_size_mb=$((file_size_bytes / 1048576))
-            local max_size_mb=95
-
-            if [ $file_size_mb -le $max_size_mb ]; then
-              echo "✅ $input_file (${file_size_mb}MB) نیازی به تقسیم ندارد."
-              return 0
-            fi
-
-            echo "⚠️  $input_file (${file_size_mb}MB) بزرگتر از ${max_size_mb}MB است. در حال تقسیم..."
-
-            local dir_name=$(dirname "$input_file")
-            local base_name=$(basename "$input_file")
-            local name_without_ext="${base_name%.*}"
-            local ext="${base_name##*.}"
-
-            local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file" 2>/dev/null)
-            if [ -z "$duration" ]; then
-              echo "❌ مدت زمان نامشخص: $input_file"
-              return 1
-            fi
-
-            local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file" 2>/dev/null)
+            [ ! -f "$input_file" ] && return 0
+            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            [ $size_mb -le 95 ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+            
+            echo "⚠️ تقسیم $input_file (${size_mb}MB)"
+            local dir=$(dirname "$input_file")
+            local base=$(basename "$input_file")
+            local name="${base%.*}"
+            local ext="${base##*.}"
+            
+            local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
+            local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
             if [ -z "$bitrate" ] || [ "$bitrate" -eq 0 ]; then
-              local avg_bitrate=$(echo "scale=0; ($file_size_bytes * 8) / $duration" | bc 2>/dev/null)
-              if [ -z "$avg_bitrate" ] || [ "$avg_bitrate" -eq 0 ]; then
-                echo "❌ نمی‌توان بیت‌ریت را محاسبه کرد: $input_file"
-                return 1
-              fi
-            else
-              local avg_bitrate=$bitrate
+              bitrate=$(( ($(stat -c%s "$input_file") * 8) / ${duration%.*} ))
             fi
-
-            local max_size_bytes=$((max_size_mb * 1048576))
-            local chunk_duration=$(echo "scale=0; ($max_size_bytes * 8) / $avg_bitrate" | bc 2>/dev/null)
-            if [ -z "$chunk_duration" ] || [ "$chunk_duration" -lt 30 ]; then
-              chunk_duration=30
-            fi
-
-            echo "محاسبه: هر قطعه حدود $chunk_duration ثانیه"
-
+            local chunk_duration=$(echo "scale=0; (95 * 1048576 * 8) / $bitrate" | bc)
+            [ "$chunk_duration" -lt 30 ] && chunk_duration=30
+            
             ffmpeg -i "$input_file" -c copy -map 0 -segment_time $chunk_duration -f segment -reset_timestamps 1 \
-              "${dir_name}/${name_without_ext}_part%03d.${ext}" < /dev/null
-
-            if [ $? -eq 0 ]; then
-              echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
-              rm -f "$input_file"
-            else
-              echo "❌ خطا در تقسیم $input_file"
-              return 1
-            fi
+              "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
           }
-
           export -f split_video_by_size
-
-          find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.avi" \) -print0 | while IFS= read -r -d '' file; do
-            split_video_by_size "$file" || true
+          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+            split_video_by_size "$file"
           done
 
-      - name: Commit and push only after splitting
+      # ============================================
+      # دسته دوم: ویدیوهای کوتاه (همه در یک پوشه مشترک)
+      # ============================================
+      - name: Download short videos (all in one folder)
+        run: |
+          mkdir -p downloads/short_videos
+          # همه فایل‌های کوتاه مستقیماً در پوشه short_videos ذخیره می‌شوند
+          yt-dlp --cookies cookies.txt \
+            --batch-file short_videos.txt \
+            --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
+            --continue \
+            --restrict-filenames \
+            --merge-output-format mp4
+
+      - name: Split short videos if needed (same 95MB limit)
+        run: |
+          split_video_by_size() {
+            local input_file="$1"
+            [ ! -f "$input_file" ] && return 0
+            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            [ $size_mb -le 95 ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+            
+            echo "⚠️ تقسیم $input_file (${size_mb}MB)"
+            local dir=$(dirname "$input_file")
+            local base=$(basename "$input_file")
+            local name="${base%.*}"
+            local ext="${base##*.}"
+            
+            local duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input_file")
+            local bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
+            if [ -z "$bitrate" ] || [ "$bitrate" -eq 0 ]; then
+              bitrate=$(( ($(stat -c%s "$input_file") * 8) / ${duration%.*} ))
+            fi
+            local chunk_duration=$(echo "scale=0; (95 * 1048576 * 8) / $bitrate" | bc)
+            [ "$chunk_duration" -lt 30 ] && chunk_duration=30
+            
+            ffmpeg -i "$input_file" -c copy -map 0 -segment_time $chunk_duration -f segment -reset_timestamps 1 \
+              "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
+          }
+          export -f split_video_by_size
+          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
+            split_video_by_size "$file"
+          done
+
+      - name: Commit and push all changes
         run: |
           git config --local user.email "your-email@example.com"
           git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با Deno و تقسیم به قطعات 95MB)" || echo "No changes to commit"
+          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (دسته‌بندی شده)" || echo "No changes to commit"
           rm -f cookies.txt
           git push
