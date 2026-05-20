@@ -9,13 +9,22 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
         
-      - name: نصب yt-dlp و ffmpeg
+      # --- مرحله 1: نصب Deno (موتور جاوااسکریپت) ---
+      - name: Setup Deno (JavaScript Runtime)
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+        
+      # --- مرحله 2: نصب ffmpeg و yt-dlp با نصب کامل ---
+      - name: Install ffmpeg and yt-dlp (با تمام امکانات)
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip ffmpeg
-          pip3 install yt-dlp
+          sudo apt-get install -y ffmpeg
+          pip3 install --upgrade pip
+          # نصب با گزینه [default] برای اطمینان از وجود اسکریپت‌های EJS
+          pip3 install "yt-dlp[default]"
           
-      - name: ساخت فایل کوکی از Secret
+      - name: Create cookies file from Secret
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           if [ ! -s cookies.txt ]; then
@@ -23,18 +32,18 @@ jobs:
             exit 1
           fi
           
-      - name: دانلود ویدیو با yt-dlp
+      - name: Download videos with yt-dlp
         run: |
-          git config --local user.email "your-email@example.com"   # تغییر دهید
-          git config --local user.name "your-username"             # تغییر دهید
+          git config --local user.email "your-email@example.com"
+          git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           
+          # دستور دانلود با مشخص کردن مسیر Deno (اختیاری)
           yt-dlp --cookies cookies.txt --config-location config.txt
-          
-      - name: تقسیم فایل‌های بزرگ (بزرگتر از 1.9 گیگابایت) با ffmpeg
+        
+      - name: Split large files with ffmpeg (اختیاری)
         run: |
-          # تابع تقسیم ویدیو بر اساس حجم
           split_video_by_size() {
             local input_file="$1"
             local max_size_mb=1900
@@ -81,18 +90,17 @@ jobs:
           
           export -f split_video_by_size
           
-          # اجرا روی همه فایل‌های ویدیویی در پوشه downloads
           find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
             split_video_by_size "$file"
           done
           
-      - name: Commit و Push نهایی
+      - name: Commit and push changes
         run: |
           git config --local user.email "your-email@example.com"
           git config --local user.name "your-username"
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با کوکی)" || echo "تغییری برای commit وجود ندارد"
+          git commit -m "دانلود ویدیوها و تقسیم فایل‌های بزرگ (با Deno)" || echo "تغییری برای commit وجود ندارد"
           rm -f cookies.txt
           git push
