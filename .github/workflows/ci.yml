@@ -48,7 +48,7 @@ jobs:
           echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt) عدد"
 
       # ============================================
-      # دانلود ویدیوهای بلند
+      # دانلود ویدیوهای بلند + تامبنیل
       # ============================================
       - name: Download long videos
         run: |
@@ -68,17 +68,23 @@ jobs:
           fi
 
       # ============================================
-      # تقسیم ویدیوهای بلند به قطعات کوچک (حداکثر 19 مگابایت)
+      # تقسیم ویدیوهای بلند به قطعات (حداکثر 19 مگابایت)
       # ============================================
       - name: Split long videos into chunks
         env:
           MAX_CHUNK_MB: 19
         run: |
           set -e
-          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' input_file; do
+          # پیدا کردن فایل‌های ویدیویی که قبلاً split نشده‌اند (نامشان _part ندارد)
+          mapfile -t video_files < <(find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -not -name "*_part*" -print0 | xargs -0 -n1 echo)
+          for input_file in "${video_files[@]}"; do
+            if [ ! -f "$input_file" ]; then
+              echo "⚠️ فایل وجود ندارد: $input_file"
+              continue
+            fi
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
-              echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
+              echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد."
               continue
             fi
             echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
@@ -86,17 +92,13 @@ jobs:
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            
-            # حذف قطعات قبلی
+            # حذف قطعات قبلی در صورت وجود
             rm -f "${dir}/${name}_part"* 2>/dev/null || true
-            
-            # تقسیم با ffmpeg (روش مطمئن)
-            # استفاده از -segment_time 10 به همراه -fs محدودیت حجم
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 10 -reset_timestamps 1 \
+            # اجرای ffmpeg با پوشش کامل خطا
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 30 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
               "${dir}/${name}_part%03d.${ext}" -y 2>&1 | tee /tmp/ffmpeg_log.txt
-            
-            # بررسی وجود حداقل یک قطعه
+            # بررسی موفقیت: آیا حداقل یک قطعه ساخته شده؟
             if [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
@@ -108,7 +110,7 @@ jobs:
           done
 
       # ============================================
-      # دانلود ویدیوهای کوتاه
+      # دانلود ویدیوهای کوتاه + تامبنیل
       # ============================================
       - name: Download short videos
         run: |
@@ -128,14 +130,19 @@ jobs:
           fi
 
       # ============================================
-      # تقسیم ویدیوهای کوتاه به قطعات کوچک (در صورت نیاز)
+      # تقسیم ویدیوهای کوتاه به قطعات (در صورت نیاز)
       # ============================================
       - name: Split short videos into chunks
         env:
           MAX_CHUNK_MB: 19
         run: |
           set -e
-          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' input_file; do
+          mapfile -t video_files < <(find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -not -name "*_part*" -print0 | xargs -0 -n1 echo)
+          for input_file in "${video_files[@]}"; do
+            if [ ! -f "$input_file" ]; then
+              echo "⚠️ فایل وجود ندارد: $input_file"
+              continue
+            fi
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
               echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
@@ -146,12 +153,10 @@ jobs:
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            
             rm -f "${dir}/${name}_part"* 2>/dev/null || true
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 10 -reset_timestamps 1 \
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 30 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
               "${dir}/${name}_part%03d.${ext}" -y 2>&1 | tee /tmp/ffmpeg_short_log.txt
-            
             if [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
