@@ -48,7 +48,7 @@ jobs:
           echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt) عدد"
 
       # ============================================
-      # دانلود ویدیوهای بلند (هر ویدیو در یک پوشه مجزا)
+      # دانلود ویدیوهای بلند
       # ============================================
       - name: Download long videos
         run: |
@@ -64,26 +64,48 @@ jobs:
             echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
           fi
 
-      - name: Split long videos into max 19MB chunks (for jsDelivr)
+      - name: Split long videos into chunks
         run: |
+          # ============================================
+          # حداکثر حجم هر قطعه به مگابایت (قابل تغییر)
+          MAX_CHUNK_MB=15
+          # ============================================
+          
           split_video_by_size() {
             local input_file="$1"
             [ ! -f "$input_file" ] && return 0
-            local max_size_mb=19
-            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
-            [ $size_mb -le $max_size_mb ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
             
-            echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${max_size_mb}MB"
+            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            [ $size_mb -le $MAX_CHUNK_MB ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+            
+            echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
             local dir=$(dirname "$input_file")
             local base=$(basename "$input_file")
             local name="${base%.*}"
             local ext="${base##*.}"
             
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 30 -reset_timestamps 1 \
-              -fs $(($max_size_mb * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
+            # استفاده از -fs برای محدودیت حجم و -segment_time بسیار بزرگ برای اجبار به استفاده از حجم
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
+              -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
+              "${dir}/${name}_part%03d.${ext}" < /dev/null
+            
+            if [ $? -eq 0 ]; then
+              # بررسی اینکه آیا حداقل یک قطعه ساخته شده
+              if ls "${dir}/${name}_part"* 1> /dev/null 2>&1; then
+                echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
+                rm -f "$input_file"
+              else
+                echo "❌ خطا: هیچ قطعه‌ای ساخته نشد."
+                return 1
+              fi
+            else
+              echo "❌ خطا در تقسیم $input_file"
+              return 1
+            fi
           }
           export -f split_video_by_size
+          export MAX_CHUNK_MB
+          
           if [ -d downloads/long_videos ]; then
             find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
               split_video_by_size "$file"
@@ -91,7 +113,7 @@ jobs:
           fi
 
       # ============================================
-      # دانلود ویدیوهای کوتاه (همه در یک پوشه مشترک)
+      # دانلود ویدیوهای کوتاه
       # ============================================
       - name: Download short videos
         run: |
@@ -107,26 +129,46 @@ jobs:
             echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
           fi
 
-      - name: Split short videos into max 19MB chunks (for jsDelivr)
+      - name: Split short videos into chunks
         run: |
+          # ============================================
+          # حداکثر حجم هر قطعه به مگابایت (قابل تغییر)
+          MAX_CHUNK_MB=15
+          # ============================================
+          
           split_video_by_size() {
             local input_file="$1"
             [ ! -f "$input_file" ] && return 0
-            local max_size_mb=19
-            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
-            [ $size_mb -le $max_size_mb ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
             
-            echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${max_size_mb}MB"
+            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            [ $size_mb -le $MAX_CHUNK_MB ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+            
+            echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
             local dir=$(dirname "$input_file")
             local base=$(basename "$input_file")
             local name="${base%.*}"
             local ext="${base##*.}"
             
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 30 -reset_timestamps 1 \
-              -fs $(($max_size_mb * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" < /dev/null && rm -f "$input_file"
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
+              -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
+              "${dir}/${name}_part%03d.${ext}" < /dev/null
+            
+            if [ $? -eq 0 ]; then
+              if ls "${dir}/${name}_part"* 1> /dev/null 2>&1; then
+                echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
+                rm -f "$input_file"
+              else
+                echo "❌ خطا: هیچ قطعه‌ای ساخته نشد."
+                return 1
+              fi
+            else
+              echo "❌ خطا در تقسیم $input_file"
+              return 1
+            fi
           }
           export -f split_video_by_size
+          export MAX_CHUNK_MB
+          
           if [ -d downloads/short_videos ]; then
             find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
               split_video_by_size "$file"
@@ -140,6 +182,8 @@ jobs:
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (با محدودیت 19MB برای jsDelivr)" || echo "No changes to commit"
+          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (با محدودیت ${MAX_CHUNK_MB}MB)" || echo "No changes to commit"
           rm -f cookies.txt long_temp.txt short_temp.txt
           git push
+        env:
+          MAX_CHUNK_MB: 15
