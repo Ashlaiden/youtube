@@ -56,7 +56,10 @@ jobs:
             mkdir -p downloads/long_videos
             yt-dlp --cookies cookies.txt \
               --batch-file long_temp.txt \
+              --write-thumbnail \
+              --convert-thumbnails jpg \
               --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
+              --output "thumbnail:downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
               --continue \
               --restrict-filenames \
               --merge-output-format mp4
@@ -65,38 +68,28 @@ jobs:
           fi
 
       # ============================================
-      # تقسیم ویدیوهای بلند (با متغیر قابل تنظیم)
+      # تقسیم ویدیوهای بلند به قطعات کوچک (برای jsDelivr)
       # ============================================
       - name: Split long videos into chunks
         env:
           MAX_CHUNK_MB: 19
         run: |
-          # پیدا کردن فایل‌ها و ذخیره در فایل موقت
           find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/long_files.txt
-          
-          # حلقه با استفاده از فایل موقت (بدون subshell)
           while IFS= read -r -d '' input_file; do
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
               echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
               continue
             fi
-            
             echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
             dir=$(dirname "$input_file")
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            
-            # حذف قطعات قبلی
             rm -f "${dir}/${name}_part"* 2>/dev/null
-            
-            # تقسیم با ffmpeg (گزینه -y برای بازنویسی خودکار)
             ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
               "${dir}/${name}_part%03d.${ext}" -y
-            
-            # بررسی موفقیت
             if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
@@ -116,7 +109,10 @@ jobs:
             mkdir -p downloads/short_videos
             yt-dlp --cookies cookies.txt \
               --batch-file short_temp.txt \
+              --write-thumbnail \
+              --convert-thumbnails jpg \
               --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
+              --output "thumbnail:downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
               --continue \
               --restrict-filenames \
               --merge-output-format mp4
@@ -125,32 +121,28 @@ jobs:
           fi
 
       # ============================================
-      # تقسیم ویدیوهای کوتاه
+      # تقسیم ویدیوهای کوتاه به قطعات کوچک (در صورت نیاز)
       # ============================================
       - name: Split short videos into chunks
         env:
           MAX_CHUNK_MB: 19
         run: |
           find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/short_files.txt
-          
           while IFS= read -r -d '' input_file; do
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
               echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
               continue
             fi
-            
             echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
             dir=$(dirname "$input_file")
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            
             rm -f "${dir}/${name}_part"* 2>/dev/null
             ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
               "${dir}/${name}_part%03d.${ext}" -y
-            
             if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
@@ -168,6 +160,6 @@ jobs:
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (با محدودیت ${MAX_CHUNK_MB}MB)" || echo "No changes to commit"
+          git commit -m "دانلود خودکار ویدیوها، تامبنیل‌ها و تقسیم به قطعات" || echo "No changes to commit"
           rm -f cookies.txt long_temp.txt short_temp.txt
           git push
