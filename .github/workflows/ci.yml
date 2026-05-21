@@ -64,53 +64,48 @@ jobs:
             echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
           fi
 
+      # ============================================
+      # تقسیم ویدیوهای بلند (با متغیر قابل تنظیم)
+      # ============================================
       - name: Split long videos into chunks
+        env:
+          MAX_CHUNK_MB: 19
         run: |
-          # ============================================
-          # حداکثر حجم هر قطعه به مگابایت (قابل تغییر)
-          MAX_CHUNK_MB=19
-          # ============================================
+          # پیدا کردن فایل‌ها و ذخیره در فایل موقت
+          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/long_files.txt
           
-          split_video_by_size() {
-            local input_file="$1"
-            [ ! -f "$input_file" ] && return 0
-            
-            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
-            [ $size_mb -le $MAX_CHUNK_MB ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+          # حلقه با استفاده از فایل موقت (بدون subshell)
+          while IFS= read -r -d '' input_file; do
+            size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            if [ $size_mb -le $MAX_CHUNK_MB ]; then
+              echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
+              continue
+            fi
             
             echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
-            local dir=$(dirname "$input_file")
-            local base=$(basename "$input_file")
-            local name="${base%.*}"
-            local ext="${base##*.}"
+            dir=$(dirname "$input_file")
+            base=$(basename "$input_file")
+            name="${base%.*}"
+            ext="${base##*.}"
             
-            # استفاده از -fs برای محدودیت حجم و -segment_time بسیار بزرگ برای اجبار به استفاده از حجم
+            # حذف قطعات قبلی
+            rm -f "${dir}/${name}_part"* 2>/dev/null
+            
+            # تقسیم با ffmpeg (گزینه -y برای بازنویسی خودکار)
             ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" < /dev/null
+              "${dir}/${name}_part%03d.${ext}" -y
             
-            if [ $? -eq 0 ]; then
-              # بررسی اینکه آیا حداقل یک قطعه ساخته شده
-              if ls "${dir}/${name}_part"* 1> /dev/null 2>&1; then
-                echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
-                rm -f "$input_file"
-              else
-                echo "❌ خطا: هیچ قطعه‌ای ساخته نشد."
-                return 1
-              fi
+            # بررسی موفقیت
+            if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
+              echo "✅ تقسیم موفق. حذف فایل اصلی..."
+              rm -f "$input_file"
             else
               echo "❌ خطا در تقسیم $input_file"
-              return 1
+              exit 1
             fi
-          }
-          export -f split_video_by_size
-          export MAX_CHUNK_MB
-          
-          if [ -d downloads/long_videos ]; then
-            find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
-              split_video_by_size "$file"
-            done
-          fi
+          done < /tmp/long_files.txt
+          rm -f /tmp/long_files.txt
 
       # ============================================
       # دانلود ویدیوهای کوتاه
@@ -129,51 +124,42 @@ jobs:
             echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
           fi
 
+      # ============================================
+      # تقسیم ویدیوهای کوتاه
+      # ============================================
       - name: Split short videos into chunks
+        env:
+          MAX_CHUNK_MB: 19
         run: |
-          # ============================================
-          # حداکثر حجم هر قطعه به مگابایت (قابل تغییر)
-          MAX_CHUNK_MB=19
-          # ============================================
+          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/short_files.txt
           
-          split_video_by_size() {
-            local input_file="$1"
-            [ ! -f "$input_file" ] && return 0
-            
-            local size_mb=$(($(stat -c%s "$input_file") / 1048576))
-            [ $size_mb -le $MAX_CHUNK_MB ] && echo "✅ $input_file (${size_mb}MB) نیازی به تقسیم ندارد." && return 0
+          while IFS= read -r -d '' input_file; do
+            size_mb=$(($(stat -c%s "$input_file") / 1048576))
+            if [ $size_mb -le $MAX_CHUNK_MB ]; then
+              echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
+              continue
+            fi
             
             echo "⚠️ تقسیم $input_file (${size_mb}MB) به قطعات حداکثر ${MAX_CHUNK_MB}MB"
-            local dir=$(dirname "$input_file")
-            local base=$(basename "$input_file")
-            local name="${base%.*}"
-            local ext="${base##*.}"
+            dir=$(dirname "$input_file")
+            base=$(basename "$input_file")
+            name="${base%.*}"
+            ext="${base##*.}"
             
+            rm -f "${dir}/${name}_part"* 2>/dev/null
             ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" < /dev/null
+              "${dir}/${name}_part%03d.${ext}" -y
             
-            if [ $? -eq 0 ]; then
-              if ls "${dir}/${name}_part"* 1> /dev/null 2>&1; then
-                echo "✅ تقسیم موفق بود. حذف فایل اصلی..."
-                rm -f "$input_file"
-              else
-                echo "❌ خطا: هیچ قطعه‌ای ساخته نشد."
-                return 1
-              fi
+            if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
+              echo "✅ تقسیم موفق. حذف فایل اصلی..."
+              rm -f "$input_file"
             else
               echo "❌ خطا در تقسیم $input_file"
-              return 1
+              exit 1
             fi
-          }
-          export -f split_video_by_size
-          export MAX_CHUNK_MB
-          
-          if [ -d downloads/short_videos ]; then
-            find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' file; do
-              split_video_by_size "$file"
-            done
-          fi
+          done < /tmp/short_files.txt
+          rm -f /tmp/short_files.txt
 
       - name: Commit and push all changes
         run: |
@@ -185,5 +171,3 @@ jobs:
           git commit -m "دانلود خودکار ویدیوهای بلند و کوتاه (با محدودیت ${MAX_CHUNK_MB}MB)" || echo "No changes to commit"
           rm -f cookies.txt long_temp.txt short_temp.txt
           git push
-        env:
-          MAX_CHUNK_MB: 15
