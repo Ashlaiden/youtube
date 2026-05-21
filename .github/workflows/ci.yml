@@ -68,14 +68,14 @@ jobs:
           fi
 
       # ============================================
-      # تقسیم ویدیوهای بلند به قطعات کوچک (برای jsDelivr)
+      # تقسیم ویدیوهای بلند به قطعات کوچک (حداکثر 19 مگابایت)
       # ============================================
       - name: Split long videos into chunks
         env:
           MAX_CHUNK_MB: 19
         run: |
-          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/long_files.txt
-          while IFS= read -r -d '' input_file; do
+          set -e
+          find downloads/long_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' input_file; do
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
               echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
@@ -86,19 +86,26 @@ jobs:
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            rm -f "${dir}/${name}_part"* 2>/dev/null
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
+            
+            # حذف قطعات قبلی
+            rm -f "${dir}/${name}_part"* 2>/dev/null || true
+            
+            # تقسیم با ffmpeg (روش مطمئن)
+            # استفاده از -segment_time 10 به همراه -fs محدودیت حجم
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 10 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" -y
-            if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
+              "${dir}/${name}_part%03d.${ext}" -y 2>&1 | tee /tmp/ffmpeg_log.txt
+            
+            # بررسی وجود حداقل یک قطعه
+            if [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
             else
-              echo "❌ خطا در تقسیم $input_file"
+              echo "❌ خطا: هیچ قطعه‌ای ساخته نشد. خروجی ffmpeg:"
+              cat /tmp/ffmpeg_log.txt
               exit 1
             fi
-          done < /tmp/long_files.txt
-          rm -f /tmp/long_files.txt
+          done
 
       # ============================================
       # دانلود ویدیوهای کوتاه
@@ -127,8 +134,8 @@ jobs:
         env:
           MAX_CHUNK_MB: 19
         run: |
-          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 > /tmp/short_files.txt
-          while IFS= read -r -d '' input_file; do
+          set -e
+          find downloads/short_videos -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) -print0 | while IFS= read -r -d '' input_file; do
             size_mb=$(($(stat -c%s "$input_file") / 1048576))
             if [ $size_mb -le $MAX_CHUNK_MB ]; then
               echo "✅ $input_file (${size_mb}MB) نیاز به تقسیم ندارد."
@@ -139,19 +146,21 @@ jobs:
             base=$(basename "$input_file")
             name="${base%.*}"
             ext="${base##*.}"
-            rm -f "${dir}/${name}_part"* 2>/dev/null
-            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 99999 -reset_timestamps 1 \
+            
+            rm -f "${dir}/${name}_part"* 2>/dev/null || true
+            ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time 10 -reset_timestamps 1 \
               -fs $(($MAX_CHUNK_MB * 1024 * 1024)) \
-              "${dir}/${name}_part%03d.${ext}" -y
-            if [ $? -eq 0 ] && [ -f "${dir}/${name}_part000.${ext}" ]; then
+              "${dir}/${name}_part%03d.${ext}" -y 2>&1 | tee /tmp/ffmpeg_short_log.txt
+            
+            if [ -f "${dir}/${name}_part000.${ext}" ]; then
               echo "✅ تقسیم موفق. حذف فایل اصلی..."
               rm -f "$input_file"
             else
-              echo "❌ خطا در تقسیم $input_file"
+              echo "❌ خطا: هیچ قطعه‌ای ساخته نشد. خروجی ffmpeg:"
+              cat /tmp/ffmpeg_short_log.txt
               exit 1
             fi
-          done < /tmp/short_files.txt
-          rm -f /tmp/short_files.txt
+          done
 
       - name: Commit and push all changes
         run: |
@@ -160,6 +169,6 @@ jobs:
           git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git pull --rebase
           git add downloads
-          git commit -m "دانلود خودکار ویدیوها، تامبنیل‌ها و تقسیم به قطعات" || echo "No changes to commit"
+          git commit -m "دانلود خودکار ویدیوها، تامبنیل‌ها و تقسیم به قطعات 19MB" || echo "No changes to commit"
           rm -f cookies.txt long_temp.txt short_temp.txt
           git push
