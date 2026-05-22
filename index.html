@@ -1,621 +1,562 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>پخش‌کننده ویدیو | کتابخانه من</title>
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', system-ui, 'Roboto', 'Helvetica Neue', sans-serif;
-        }
-
-        body {
-            background: #0f0f0f; /* رنگ پس‌زمینه یوتیوب */
-            color: #f1f1f1;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* هدر شبیه یوتیوب */
-        .header {
-            background: #0f0f0f;
-            border-bottom: 1px solid #272727;
-            padding: 0.6rem 1.5rem;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 0.8rem;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 700;
-            font-size: 1.4rem;
-            color: #ffffff;
-            text-decoration: none;
-        }
-        .logo svg {
-            width: 28px;
-            height: 28px;
-            fill: #ff0000;
-        }
-
-        .nav-buttons {
-            display: flex;
-            gap: 0.5rem;
-        }
-        .nav-btn {
-            background: #272727;
-            border: none;
-            color: #f1f1f1;
-            padding: 0.4rem 1rem;
-            border-radius: 30px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .nav-btn:hover {
-            background: #3f3f3f;
-        }
-        .nav-btn.home-btn {
-            background: #ff0000;
-            color: white;
-        }
-        .nav-btn.home-btn:hover {
-            background: #cc0000;
-        }
-
-        .domain-switch {
-            display: flex;
-            gap: 0.3rem;
-            background: #272727;
-            padding: 0.2rem 0.5rem;
-            border-radius: 40px;
-        }
-        .domain-switch button {
-            background: transparent;
-            border: none;
-            color: #aaa;
-            padding: 0.3rem 0.8rem;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 0.75rem;
-            font-weight: 500;
-            transition: 0.2s;
-        }
-        .domain-switch button.active {
-            background: #3f3f3f;
-            color: white;
-        }
-
-        .current-path {
-            background: #272727;
-            padding: 0.4rem 1rem;
-            border-radius: 30px;
-            font-size: 0.8rem;
-            font-family: monospace;
-            color: #ccc;
-        }
-
-        /* پلیر با ابعاد ثابت */
-        .player-section {
-            display: flex;
-            justify-content: center;
-            margin: 1rem auto;
-            padding: 0 1rem;
-            max-width: 100%;
-        }
-        .player-section.hidden {
-            display: none;
-        }
-        .player-wrapper {
-            width: 100%;
-            max-width: 960px;
-            background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
-        }
-        .plyr {
-            border-radius: 0;
-            width: 100%;
-            aspect-ratio: 16 / 9; /* نسبت 16:9 ثابت */
-        }
-        .player-info {
-            padding: 0.8rem 1rem;
-            background: #1e1e1e;
-        }
-        .video-title {
-            font-size: 1rem;
-            font-weight: 500;
-        }
-
-        /* تب‌ها */
-        .tabs {
-            display: flex;
-            gap: 0.2rem;
-            margin: 1rem 1rem 0.5rem 1rem;
-            border-bottom: 1px solid #333;
-        }
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: #aaa;
-            font-size: 0.9rem;
-            font-weight: 600;
-            padding: 0.6rem 1.2rem;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .tab-btn.active {
-            color: white;
-            border-bottom: 2px solid #ff0000;
-        }
-
-        /* گرید ویدیوها (شبیه یوتیوب) */
-        .content-container {
-            margin: 1rem 1.5rem 2rem 1.5rem;
-        }
-        .library-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1.2rem;
-        }
-        .video-card {
-            background: #1e1e1e;
-            border-radius: 14px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .video-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 20px rgba(0,0,0,0.4);
-        }
-        .thumbnail {
-            position: relative;
-            background: #0a0a0a;
-            aspect-ratio: 16 / 9;
-            overflow: hidden;
-        }
-        .thumbnail img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-        .thumbnail-placeholder {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background: #2a2a2a;
-            color: #888;
-            font-size: 2rem;
-        }
-        .duration-badge {
-            position: absolute;
-            bottom: 6px;
-            right: 6px;
-            background: rgba(0,0,0,0.8);
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 0.7rem;
-            font-weight: 500;
-        }
-        .card-info {
-            padding: 0.7rem;
-        }
-        .card-title {
-            font-weight: 500;
-            font-size: 0.9rem;
-            line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .card-meta {
-            font-size: 0.7rem;
-            color: #aaa;
-            margin-top: 0.4rem;
-        }
-
-        .loading-state, .empty-state {
-            text-align: center;
-            padding: 3rem;
-            color: #aaa;
-        }
-        .spinner {
-            border: 3px solid #333;
-            border-top: 3px solid #ff0000;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        @media (max-width: 700px) {
-            .header {
-                padding: 0.5rem 1rem;
-            }
-            .domain-switch button {
-                padding: 0.2rem 0.6rem;
-            }
-            .content-container {
-                margin: 1rem;
-            }
-            .library-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+ <meta charset="UTF-8" />
+ <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+ <title>Media Vault</title>
+ <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+ <link rel="preconnect" href="https://raw.githubusercontent.com" />
+ <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+ <style>
+   :root{
+     --bg:#0b0f14;
+     --panel:#111823;
+     --panel-2:#151f2d;
+     --border:#223044;
+     --text:#e7edf7;
+     --muted:#9aa7b8;
+     --accent:#ff2d2d;
+     --accent-2:#ff6b6b;
+     --shadow: 0 16px 40px rgba(0,0,0,.35);
+     --radius: 20px;
+   }
+   *{box-sizing:border-box}
+   html,body{margin:0;padding:0;background:radial-gradient(circle at top, #111827 0, var(--bg) 45%);color:var(--text);font-family:Segoe UI,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
+   a{color:inherit;text-decoration:none}
+   button,input{font:inherit}
+   .app{max-width:1400px;margin:0 auto;padding:18px}
+   .header{
+     position:sticky;top:0;z-index:20;
+     backdrop-filter: blur(12px);
+     background: rgba(11,15,20,.75);
+     border:1px solid rgba(34,48,68,.8);
+     border-radius:24px;
+     box-shadow:var(--shadow);
+     padding:14px 16px;
+     display:grid;
+     grid-template-columns:auto auto 1fr auto;
+     gap:12px;
+     align-items:center;
+     margin-bottom:18px;
+   }
+   .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem}
+   .brand-badge{
+     width:38px;height:38px;border-radius:14px;
+     display:grid;place-items:center;
+     background:linear-gradient(135deg,var(--accent),#ff7a7a);
+     box-shadow:0 10px 24px rgba(255,45,45,.35);
+   }
+   .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+   .chip,.btn,.tab,.domain-btn{
+     border:1px solid var(--border);
+     background:linear-gradient(180deg,var(--panel),var(--panel-2));
+     color:var(--text);
+     border-radius:999px;
+     padding:10px 14px;
+     cursor:pointer;
+     transition:.2s ease;
+     box-shadow:0 6px 18px rgba(0,0,0,.18);
+   }
+   .btn:hover,.tab:hover,.domain-btn:hover,.chip:hover{transform:translateY(-1px);border-color:#355074}
+   .btn.primary,.tab.active,.domain-btn.active{
+     background:linear-gradient(180deg,#ff3d3d,#d41414);
+     border-color:transparent;
+     color:#fff;
+   }
+   .search{
+     width:100%;
+     border-radius:999px;
+     border:1px solid var(--border);
+     background:rgba(17,24,35,.9);
+     color:var(--text);
+     padding:12px 16px;
+     outline:none;
+   }
+   .search::placeholder{color:var(--muted)}
+   .tabs{
+     display:flex;gap:10px;flex-wrap:wrap;
+     margin:0 0 16px;
+   }
+   .hero{
+     display:flex;justify-content:space-between;gap:12px;align-items:center;
+     padding:10px 2px 18px;color:var(--muted);flex-wrap:wrap
+   }
+   .player-wrap{
+     display:none;
+     margin-bottom:18px;
+     background:linear-gradient(180deg,var(--panel),var(--panel-2));
+     border:1px solid var(--border);
+     border-radius:var(--radius);
+     overflow:hidden;
+     box-shadow:var(--shadow);
+   }
+   .player-wrap.visible{display:block}
+   .player{
+     width:100%;
+     aspect-ratio:16/9;
+     background:#000;
+   }
+   .player-meta{
+     padding:14px 16px;
+     display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap
+   }
+   .player-title{font-size:1rem;font-weight:700;line-height:1.4}
+   .grid{
+     display:grid;
+     grid-template-columns:repeat(auto-fill,minmax(250px,1fr));
+     gap:16px;
+   }
+   .card{
+     background:linear-gradient(180deg,var(--panel),var(--panel-2));
+     border:1px solid var(--border);
+     border-radius:24px;
+     overflow:hidden;
+     box-shadow:var(--shadow);
+     transition:.2s ease;
+     cursor:pointer;
+   }
+   .card:hover{transform:translateY(-4px);border-color:#355074}
+   .thumb{
+     position:relative;
+     aspect-ratio:16/9;
+     background:#0b0f14;
+     overflow:hidden;
+   }
+   .thumb img,.thumb video{
+     width:100%;height:100%;object-fit:cover;display:block
+   }
+   .thumb-fallback{
+     width:100%;height:100%;
+     display:grid;place-items:center;
+     background:linear-gradient(135deg,#1c2532,#0f1620);
+     color:#8ea0b8;
+     text-align:center;
+     padding:12px;
+   }
+   .badge{
+     position:absolute;bottom:10px;left:10px;
+     background:rgba(0,0,0,.72);
+     color:#fff;
+     padding:6px 10px;border-radius:999px;
+     font-size:.8rem;
+     backdrop-filter: blur(8px);
+   }
+   .card-body{padding:14px}
+   .title{
+     font-size:.98rem;font-weight:700;line-height:1.5;
+     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+     min-height:3rem;
+   }
+   .meta{margin-top:8px;color:var(--muted);font-size:.82rem;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+   .actions .btn{padding:9px 12px;font-size:.88rem}
+   .state{
+     padding:56px 20px;
+     text-align:center;
+     color:var(--muted);
+   }
+   .spinner{
+     width:42px;height:42px;border-radius:50%;
+     border:3px solid rgba(255,255,255,.12);
+     border-top-color:var(--accent);
+     margin:0 auto 14px;
+     animation:spin 1s linear infinite;
+   }
+   @keyframes spin{to{transform:rotate(360deg)}}
+   @media (max-width: 900px){
+     .header{grid-template-columns:1fr;align-items:stretch}
+     .brand{justify-content:flex-start}
+   }
+ </style>
 </head>
 <body>
+ <div class="app">
+   <div class="header">
+     <div class="brand">
+       <div class="brand-badge">▶</div>
+       <div>
+         <div>Media Vault</div>
+         <div style="font-size:.8rem;color:var(--muted);font-weight:500">GitHub Pages + jsDelivr / Raw</div>
+       </div>
+     </div>
 
-<div class="header">
-    <div class="logo">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M10 8.64L15.27 12 10 15.36V8.64zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
-        <span>Media Vault</span>
-    </div>
-    <div class="nav-buttons">
-        <button class="nav-btn back-btn" id="backBtn">↩️ بازگشت</button>
-        <button class="nav-btn home-btn" id="homeBtn">🏠 صفحه اصلی</button>
-    </div>
-    <div class="domain-switch" id="domainSwitch">
-        <button data-domain="jsdelivr" class="active">jsDelivr</button>
-        <button data-domain="raw">GitHub Raw</button>
-    </div>
-    <div class="current-path" id="currentPathDisplay">📁 کتابخانه</div>
-</div>
+     <div class="toolbar">
+       <button class="btn" id="homeBtn">خانه</button>
+       <button class="btn" id="backBtn">بازگشت</button>
+     </div>
 
-<div class="player-section hidden" id="playerSection">
-    <div class="player-wrapper">
-        <video id="smartPlayer" class="plyr" playsinline crossorigin></video>
-        <div class="player-info">
-            <div class="video-title" id="playerTitle">—</div>
-        </div>
-    </div>
-</div>
+     <input id="searchInput" class="search" type="search" placeholder="جستجو بین ویدیوها..." />
 
-<div class="tabs">
-    <button class="tab-btn active" data-tab="videos">🎬 ویدیو‌های بلند</button>
-    <button class="tab-btn" data-tab="shorts">📱 Shorts</button>
-</div>
+     <div class="toolbar" id="domainSwitch">
+       <button class="domain-btn active" data-domain="pages">Pages</button>
+       <button class="domain-btn" data-domain="jsdelivr">jsDelivr</button>
+       <button class="domain-btn" data-domain="raw">Raw</button>
+     </div>
+   </div>
 
-<div class="content-container" id="contentContainer">
-    <div class="loading-state"><div class="spinner"></div><div>در حال بارگذاری کتابخانه...</div></div>
-</div>
+   <div class="hero">
+     <div id="pathLabel">کتابخانه</div>
+     <div id="countLabel">—</div>
+   </div>
 
-<script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-<script>
-    // ============== تنظیمات مخزن (تغییر دهید) ==============
-    const REPO_OWNER = 'Ashlaiden';      // نام کاربری خود را وارد کنید
-    const REPO_NAME = 'youtube';          // نام مخزن
-    const BRANCH = 'main';
+   <div class="tabs">
+     <button class="tab active" data-tab="long">ویدیوهای بلند</button>
+     <button class="tab" data-tab="short">Shorts</button>
+   </div>
 
-    const LONG_VIDEOS_PATH = 'downloads/long_videos';
-    const SHORTS_PATH = 'downloads/short_videos';
+   <div class="player-wrap" id="playerWrap">
+     <video id="player" class="player" controls playsinline crossorigin="anonymous"></video>
+     <div class="player-meta">
+       <div class="player-title" id="playerTitle">—</div>
+       <a id="downloadLink" class="btn primary" href="#" target="_blank" rel="noopener">دانلود فایل کامل</a>
+     </div>
+   </div>
 
-    let currentDomain = 'jsdelivr'; // 'jsdelivr' یا 'raw'
+   <div id="content">
+     <div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>
+   </div>
+ </div>
 
-    function getStreamableUrl(filePath) {
-        if (currentDomain === 'jsdelivr') {
-            return `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${BRANCH}/${filePath}`;
-        } else {
-            return `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${filePath}`;
-        }
-    }
+ <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+ <script>
+   const REPO_OWNER = "Ashlaiden";
+   const REPO_NAME = "youtube";
+   const BRANCH = "main";
 
-    async function fetchGitHubContents(path) {
-        const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
-        const response = await fetch(apiUrl);
-        if (!response.ok) throw new Error(`GitHub API error ${response.status}: ${path}`);
-        return await response.json();
-    }
+   const SOURCE_URLS = {
+     pages: (path) => `./${path}`,
+     jsdelivr: (path) => `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${BRANCH}/${path}`,
+     raw: (path) => `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${path}`,
+   };
 
-    function isVideoFile(filename) {
-        const ext = filename.split('.').pop().toLowerCase();
-        return ['mp4', 'webm', 'mkv', 'mov', 'm4v'].includes(ext);
-    }
+   const state = {
+     source: "pages",
+     tab: "long",
+     library: null,
+     query: "",
+     currentPlaylist: [],
+     currentIndex: 0,
+     player: null,
+   };
 
-    function isThumbnailFile(filename) {
-        const ext = filename.split('.').pop().toLowerCase();
-        return ext === 'jpg' || ext === 'jpeg' || ext === 'png';
-    }
+   const el = {
+     content: document.getElementById("content"),
+     searchInput: document.getElementById("searchInput"),
+     pathLabel: document.getElementById("pathLabel"),
+     countLabel: document.getElementById("countLabel"),
+     tabs: [...document.querySelectorAll(".tab")],
+     domainBtns: [...document.querySelectorAll(".domain-btn")],
+     playerWrap: document.getElementById("playerWrap"),
+     playerTitle: document.getElementById("playerTitle"),
+     player: document.getElementById("player"),
+     downloadLink: document.getElementById("downloadLink"),
+   };
 
-    // بارگذاری ویدیوهای بلند + تامبنیل
-    async function loadLongVideos() {
-        try {
-            const items = await fetchGitHubContents(LONG_VIDEOS_PATH);
-            const folders = items.filter(i => i.type === 'dir');
-            const videosData = [];
-            for (const folder of folders) {
-                const folderPath = `${LONG_VIDEOS_PATH}/${folder.name}`;
-                const folderContents = await fetchGitHubContents(folderPath);
-                const videoFiles = folderContents.filter(f => f.type === 'file' && isVideoFile(f.name));
-                const thumbnailFile = folderContents.find(f => f.type === 'file' && isThumbnailFile(f.name));
-                videoFiles.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-                const videoUrls = videoFiles.map(vf => getStreamableUrl(vf.path));
-                const thumbnailUrl = thumbnailFile ? getStreamableUrl(thumbnailFile.path) : null;
-                if (videoUrls.length === 0) continue;
-                let title = folder.name.replace(/_/g, ' ').replace(/part\d+/gi, '').trim();
-                if (!title) title = folder.name;
-                videosData.push({
-                    id: folder.name,
-                    title: title,
-                    parts: videoUrls,
-                    totalParts: videoUrls.length,
-                    thumbnail: thumbnailUrl
-                });
-            }
-            return videosData;
-        } catch (err) {
-            console.error("خطا در بارگذاری ویدیوهای بلند:", err);
-            return [];
-        }
-    }
+   function assetUrl(path) {
+     if (!path) return "";
+     return SOURCE_URLS[state.source](path);
+   }
 
-    // بارگذاری ویدیوهای کوتاه + تامبنیل
-    async function loadShortVideos() {
-        try {
-            const items = await fetchGitHubContents(SHORTS_PATH);
-            const videoFiles = items.filter(i => i.type === 'file' && isVideoFile(i.name));
-            const thumbnailFiles = items.filter(i => i.type === 'file' && isThumbnailFile(i.name));
-            // گروه‌بندی ویدیوها بر اساس نام پایه (برای ویدیوهای چندبخشی)
-            const groups = new Map();
-            for (const file of videoFiles) {
-                let base = file.name.replace(/_(part\d+)/i, '').replace(/\.\w+$/, '');
-                if (!groups.has(base)) groups.set(base, []);
-                groups.get(base).push({ name: file.name, path: file.path });
-            }
-            const shortsData = [];
-            for (let [base, files] of groups.entries()) {
-                files.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-                const urls = files.map(f => getStreamableUrl(f.path));
-                // یافتن تامبنیل مرتبط: هر فایل تصویری که نامش حاوی base باشد یا اولین تصویر
-                let thumbFile = thumbnailFiles.find(t => t.name.includes(base) || (thumbnailFiles.length > 0 && !thumbnailFiles[0]));
-                if (!thumbFile && thumbnailFiles.length) thumbFile = thumbnailFiles[0];
-                const thumbnailUrl = thumbFile ? getStreamableUrl(thumbFile.path) : null;
-                shortsData.push({
-                    id: base,
-                    title: base.replace(/_/g, ' '),
-                    parts: urls,
-                    totalParts: urls.length,
-                    thumbnail: thumbnailUrl
-                });
-            }
-            return shortsData;
-        } catch (err) {
-            console.error("خطا در بارگذاری Shorts:", err);
-            return [];
-        }
-    }
+   function manifestUrl() {
+     return assetUrl("assets/library.json");
+   }
 
-    function renderVideoGrid(items, type) {
-        if (!items.length) {
-            contentContainer.innerHTML = `<div class="empty-state">📭 هیچ ویدیویی در این بخش یافت نشد.</div>`;
-            return;
-        }
-        const grid = document.createElement('div');
-        grid.className = 'library-grid';
-        for (const item of items) {
-            const card = document.createElement('div');
-            card.className = 'video-card';
-            card.setAttribute('data-id', item.id);
-            const thumbDiv = document.createElement('div');
-            thumbDiv.className = 'thumbnail';
-            if (item.thumbnail) {
-                const img = document.createElement('img');
-                img.src = item.thumbnail;
-                img.alt = item.title;
-                img.loading = 'lazy';
-                img.onerror = () => { // در صورت خطا، پلاهولدر نشان بده
-                    img.style.display = 'none';
-                    const placeholder = document.createElement('div');
-                    placeholder.className = 'thumbnail-placeholder';
-                    placeholder.innerHTML = `<div>${type === 'long' ? '🎬' : '📱'}</div><span>${item.totalParts} قطعه</span>`;
-                    thumbDiv.appendChild(placeholder);
-                };
-                thumbDiv.appendChild(img);
-            } else {
-                const placeholder = document.createElement('div');
-                placeholder.className = 'thumbnail-placeholder';
-                placeholder.innerHTML = `<div>${type === 'long' ? '🎬' : '📱'}</div><span>${item.totalParts > 1 ? item.totalParts + ' قطعه' : 'Short'}</span>`;
-                thumbDiv.appendChild(placeholder);
-            }
-            if (item.totalParts > 1) {
-                const badge = document.createElement('div');
-                badge.className = 'duration-badge';
-                badge.innerText = `${item.totalParts} قسمت`;
-                thumbDiv.appendChild(badge);
-            }
-            const infoDiv = document.createElement('div');
-            infoDiv.className = 'card-info';
-            const titleSpan = document.createElement('div');
-            titleSpan.className = 'card-title';
-            titleSpan.innerText = item.title.length > 60 ? item.title.slice(0,57)+'...' : item.title;
-            const metaSpan = document.createElement('div');
-            metaSpan.className = 'card-meta';
-            metaSpan.innerText = type === 'long' ? `${item.totalParts} قسمت` : `${item.totalParts} قطعه`;
-            infoDiv.appendChild(titleSpan);
-            infoDiv.appendChild(metaSpan);
-            card.appendChild(thumbDiv);
-            card.appendChild(infoDiv);
-            card.addEventListener('click', () => playSelectedItem(item, type));
-            grid.appendChild(card);
-        }
-        contentContainer.innerHTML = '';
-        contentContainer.appendChild(grid);
-    }
+   function videoLabel(kind) {
+     return kind === "long" ? "ویدیو بلند" : "Short";
+   }
 
-    let currentPlayer = null;
-    let endedHandler = null;
-    let currentPlaylist = null; // برای مدیریت قطع پخش هنگام تعویض تب
+   function isImage(name = "") {
+     return /\.(jpg|jpeg|png|webp)$/i.test(name);
+   }
 
-    const playerVideo = document.getElementById('smartPlayer');
-    const playerSection = document.getElementById('playerSection');
-    const playerTitle = document.getElementById('playerTitle');
+   function makeFallbackHTML(item) {
+     const icon = item.kind === "long" ? "🎬" : "📱";
+     const count = item.parts?.length || 0;
+     return `
+       <div class="thumb-fallback">
+         <div>
+           <div style="font-size:2rem">${icon}</div>
+           <div style="margin-top:8px">${count ? `${count} پارت` : "بدون پارت"}</div>
+         </div>
+       </div>
+     `;
+   }
 
-    function playSelectedItem(item, type) {
-        if (endedHandler) playerVideo.removeEventListener('ended', endedHandler);
-        if (currentPlayer) currentPlayer.destroy();
-        playerVideo.pause();
-        if (item.parts.length === 1) {
-            playerVideo.src = item.parts[0];
-            playerTitle.innerText = item.title;
-            playerSection.classList.remove('hidden');
-            playerVideo.load();
-            playerVideo.play().catch(e=>console.warn(e));
-            currentPlayer = new Plyr(playerVideo);
-        } else {
-            let currentPartIndex = 0;
-            const playPart = (index) => {
-                if (index >= item.parts.length) return;
-                playerVideo.src = item.parts[index];
-                playerTitle.innerText = `${item.title} (بخش ${index+1}/${item.parts.length})`;
-                playerVideo.load();
-                playerVideo.play().catch(e=>console.warn(e));
-                if (currentPlayer) currentPlayer.destroy();
-                currentPlayer = new Plyr(playerVideo);
-                if (endedHandler) playerVideo.removeEventListener('ended', endedHandler);
-                endedHandler = () => playPart(index + 1);
-                playerVideo.addEventListener('ended', endedHandler);
-            };
-            playPart(0);
-            playerSection.classList.remove('hidden');
-        }
-    }
+   async function capturePoster(url) {
+     return new Promise((resolve) => {
+       const video = document.createElement("video");
+       video.crossOrigin = "anonymous";
+       video.muted = true;
+       video.playsInline = true;
+       video.preload = "auto";
+       video.src = url;
 
-    // مدیریت تب‌ها و تاریخچه بازگشت
-    let tabHistory = ['videos']; // تاریخچه تب‌ها
-    let currentTab = 'videos';
+       const cleanup = () => {
+         video.removeAttribute("src");
+         video.load();
+       };
 
-    async function renderCurrentTab() {
-        contentContainer.innerHTML = `<div class="loading-state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>`;
-        let items = [];
-        if (currentTab === 'videos') {
-            items = await loadLongVideos();
-            renderVideoGrid(items, 'long');
-        } else {
-            items = await loadShortVideos();
-            renderVideoGrid(items, 'short');
-        }
-        document.getElementById('currentPathDisplay').innerText = currentTab === 'videos' ? '📁 ویدیوهای بلند' : '📱 Shorts';
-    }
+       video.addEventListener("error", () => { cleanup(); resolve(null); }, { once: true });
+       video.addEventListener("loadeddata", async () => {
+         try {
+           video.currentTime = Math.min(1, Math.max(0.1, (video.duration || 2) * 0.08));
+         } catch {
+           cleanup();
+           resolve(null);
+         }
+       }, { once: true });
 
-    function switchTab(tab) {
-        if (tab === currentTab) return;
-        // ذخیره در تاریخچه
-        tabHistory.push(tab);
-        currentTab = tab;
-        // به‌روزرسانی UI تب
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            if (btn.getAttribute('data-tab') === tab) btn.classList.add('active');
-            else btn.classList.remove('active');
-        });
-        renderCurrentTab();
-        // بستن پلیر در هنگام تغییر تب
-        playerSection.classList.add('hidden');
-        if (playerVideo.src) playerVideo.pause();
-        if (currentPlayer) currentPlayer.destroy();
-        if (endedHandler) playerVideo.removeEventListener('ended', endedHandler);
-    }
+       video.addEventListener("seeked", () => {
+         try {
+           const canvas = document.createElement("canvas");
+           canvas.width = video.videoWidth || 1280;
+           canvas.height = video.videoHeight || 720;
+           const ctx = canvas.getContext("2d");
+           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+           const data = canvas.toDataURL("image/jpeg", 0.82);
+           cleanup();
+           resolve(data);
+         } catch {
+           cleanup();
+           resolve(null);
+         }
+       }, { once: true });
+     });
+   }
 
-    function goBack() {
-        if (tabHistory.length > 1) {
-            tabHistory.pop(); // حذف فعلی
-            const prevTab = tabHistory.pop();
-            if (prevTab) {
-                currentTab = prevTab;
-                // به‌روزرسانی دکمه‌های تب
-                document.querySelectorAll('.tab-btn').forEach(btn => {
-                    if (btn.getAttribute('data-tab') === prevTab) btn.classList.add('active');
-                    else btn.classList.remove('active');
-                });
-                renderCurrentTab();
-                // بستن پلیر
-                playerSection.classList.add('hidden');
-                if (playerVideo.src) playerVideo.pause();
-                if (currentPlayer) currentPlayer.destroy();
-                if (endedHandler) playerVideo.removeEventListener('ended', endedHandler);
-                // دوباره تب قبلی رو به تاریخچه اضافه نکنیم چون در switchTab دوباره اضافه می‌شه
-                // اما برای جلوگیری از دوباره کاری، history رو درست می‌کنیم
-                tabHistory = [prevTab]; // ریست ساده
-            }
-        } else {
-            // اگر چیزی نبود، به تب ویدیوهای بلند برو
-            if (currentTab !== 'videos') switchTab('videos');
-        }
-    }
+   async function enhanceThumbnail(img, item) {
+     if (item.thumbnail) return;
+     const first = item.parts?.[0] || item.full;
+     if (!first) return;
+     try {
+       const poster = await capturePoster(assetUrl(first));
+       if (poster) img.src = poster;
+     } catch {}
+   }
 
-    function goHome() {
-        // بازنشانی به تب ویدیوهای بلند و پیمایش به بالا
-        if (currentTab !== 'videos') switchTab('videos');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        // پاک کردن تاریخچه
-        tabHistory = ['videos'];
-    }
+   function render(items) {
+     const filtered = items.filter((item) => {
+       const q = state.query.trim().toLowerCase();
+       if (!q) return true;
+       return [
+         item.title,
+         item.id,
+         item.kind,
+         item.uploader,
+         item.channel
+       ].some(v => (v || "").toString().toLowerCase().includes(q));
+     });
 
-    function initTabs() {
-        const tabs = document.querySelectorAll('.tab-btn');
-        tabs.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.getAttribute('data-tab');
-                switchTab(tab);
-            });
-        });
-    }
+     el.pathLabel.textContent = state.tab === "long" ? "📁 ویدیوهای بلند" : "📱 Shorts";
+     el.countLabel.textContent = `${filtered.length} مورد`;
 
-    function initDomainSwitch() {
-        const btns = document.querySelectorAll('#domainSwitch button');
-        btns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                btns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentDomain = btn.getAttribute('data-domain');
-                renderCurrentTab();
-                // بستن پلیر
-                playerSection.classList.add('hidden');
-                if (playerVideo.src) playerVideo.pause();
-                if (currentPlayer) currentPlayer.destroy();
-                if (endedHandler) playerVideo.removeEventListener('ended', endedHandler);
-            });
-        });
-    }
+     if (!filtered.length) {
+       el.content.innerHTML = `<div class="state">چیزی پیدا نشد.</div>`;
+       return;
+     }
 
-    // دکمه‌های ناوبری
-    document.getElementById('backBtn').addEventListener('click', goBack);
-    document.getElementById('homeBtn').addEventListener('click', goHome);
+     const grid = document.createElement("div");
+     grid.className = "grid";
 
-    (async function init() {
-        initTabs();
-        initDomainSwitch();
-        await renderCurrentTab();
-        playerVideo.addEventListener('error', (e) => {
-            console.error("خطا در پخش ویدیو. ممکن است دامنه انتخاب شده مسدود باشد.", e);
-            alert("خطا در پخش. لطفاً دامنه دیگر را امتحان کنید.");
-        });
-    })();
-</script>
+     for (const item of filtered) {
+       const card = document.createElement("div");
+       card.className = "card";
+
+       const thumb = document.createElement("div");
+       thumb.className = "thumb";
+
+       if (item.thumbnail) {
+         const img = document.createElement("img");
+         img.loading = "lazy";
+         img.alt = item.title;
+         img.src = assetUrl(item.thumbnail);
+         img.onerror = async () => {
+           thumb.innerHTML = makeFallbackHTML(item);
+           await enhanceThumbnail(img, item);
+         };
+         thumb.appendChild(img);
+       } else {
+         thumb.innerHTML = makeFallbackHTML(item);
+         thumb.addEventListener("mouseenter", async () => {
+           if (thumb.dataset.done === "1") return;
+           thumb.dataset.done = "1";
+           const existing = thumb.querySelector("img");
+           if (existing) return;
+           const img = document.createElement("img");
+           img.alt = item.title;
+           img.loading = "lazy";
+           thumb.innerHTML = "";
+           thumb.appendChild(img);
+           await enhanceThumbnail(img, item);
+           if (!img.src) {
+             thumb.innerHTML = makeFallbackHTML(item);
+           }
+         }, { once: true });
+       }
+
+       const badge = document.createElement("div");
+       badge.className = "badge";
+       badge.textContent = `${item.parts?.length || 0} پارت`;
+       thumb.appendChild(badge);
+
+       const body = document.createElement("div");
+       body.className = "card-body";
+
+       const title = document.createElement("div");
+       title.className = "title";
+       title.textContent = item.title || item.id;
+
+       const meta = document.createElement("div");
+       meta.className = "meta";
+       meta.innerHTML = `
+         <span>${videoLabel(item.kind)}</span>
+         <span>${item.duration ? `${Math.round(item.duration)} ثانیه` : ""}</span>
+       `;
+
+       const actions = document.createElement("div");
+       actions.className = "actions";
+
+       const playBtn = document.createElement("button");
+       playBtn.className = "btn primary";
+       playBtn.textContent = "پخش";
+       playBtn.addEventListener("click", (e) => {
+         e.stopPropagation();
+         playItem(item);
+       });
+
+       const downloadBtn = document.createElement("a");
+       downloadBtn.className = "btn";
+       downloadBtn.textContent = "دانلود";
+       downloadBtn.href = assetUrl(item.full || item.parts?.[0]);
+       downloadBtn.target = "_blank";
+       downloadBtn.rel = "noopener";
+       downloadBtn.addEventListener("click", (e) => e.stopPropagation());
+
+       actions.appendChild(playBtn);
+       actions.appendChild(downloadBtn);
+
+       body.appendChild(title);
+       body.appendChild(meta);
+       body.appendChild(actions);
+
+       card.appendChild(thumb);
+       card.appendChild(body);
+       card.addEventListener("click", () => playItem(item));
+       grid.appendChild(card);
+     }
+
+     el.content.innerHTML = "";
+     el.content.appendChild(grid);
+   }
+
+   function setPlayerSource(url, title) {
+     el.player.src = url;
+     el.playerTitle.textContent = title;
+     el.playerWrap.classList.add("visible");
+     el.player.load();
+
+     if (!state.player) {
+       state.player = new Plyr(el.player, {
+         controls: ["play-large", "play", "progress", "current-time", "mute", "volume", "settings", "fullscreen"]
+       });
+     }
+   }
+
+   function playItem(item) {
+     const playlist = item.parts?.length ? item.parts : (item.full ? [item.full] : []);
+     if (!playlist.length) return;
+
+     state.currentPlaylist = playlist;
+     state.currentIndex = 0;
+
+     const playIndex = (index) => {
+       if (index >= state.currentPlaylist.length) return;
+       state.currentIndex = index;
+       const currentUrl = assetUrl(state.currentPlaylist[index]);
+       const suffix = state.currentPlaylist.length > 1
+         ? ` (پارت ${index + 1} از ${state.currentPlaylist.length})`
+         : "";
+       setPlayerSource(currentUrl, `${item.title}${suffix}`);
+
+       el.downloadLink.href = assetUrl(item.full || state.currentPlaylist[0]);
+       el.downloadLink.download = "";
+
+       const onEnded = () => {
+         el.player.removeEventListener("ended", onEnded);
+         playIndex(index + 1);
+       };
+       el.player.addEventListener("ended", onEnded, { once: true });
+
+       el.player.play().catch(() => {});
+     };
+
+     playIndex(0);
+   }
+
+   async function loadLibrary() {
+     const res = await fetch(manifestUrl(), { cache: "no-store" });
+     if (!res.ok) {
+       throw new Error(`Failed to load manifest: ${res.status}`);
+     }
+     return await res.json();
+   }
+
+   function currentItems() {
+     if (!state.library) return [];
+     return state.library.sections?.[state.tab] || [];
+   }
+
+   async function reload() {
+     el.content.innerHTML = `<div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>`;
+     try {
+       state.library = await loadLibrary();
+       render(currentItems());
+     } catch (err) {
+       console.error(err);
+       el.content.innerHTML = `<div class="state">لود نشد. مسیر manifest یا branch را چک کن.</div>`;
+     }
+   }
+
+   el.searchInput.addEventListener("input", () => {
+     state.query = el.searchInput.value || "";
+     render(currentItems());
+   });
+
+   el.tabs.forEach(btn => {
+     btn.addEventListener("click", async () => {
+       el.tabs.forEach(b => b.classList.remove("active"));
+       btn.classList.add("active");
+       state.tab = btn.dataset.tab;
+       render(currentItems());
+     });
+   });
+
+   el.domainBtns.forEach(btn => {
+     btn.addEventListener("click", async () => {
+       el.domainBtns.forEach(b => b.classList.remove("active"));
+       btn.classList.add("active");
+       state.source = btn.dataset.domain;
+       await reload();
+     });
+   });
+
+   document.getElementById("homeBtn").addEventListener("click", () => {
+     state.query = "";
+     el.searchInput.value = "";
+     state.tab = "long";
+     el.tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === "long"));
+     render(currentItems());
+     window.scrollTo({ top: 0, behavior: "smooth" });
+   });
+
+   document.getElementById("backBtn").addEventListener("click", () => {
+     history.back();
+   });
+
+   (async function init() {
+     await reload();
+   })();
+ </script>
 </body>
 </html>
+
