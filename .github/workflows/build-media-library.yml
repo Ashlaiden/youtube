@@ -2,9 +2,6 @@ name: ci
 
 on:
   push:
-    branches:
-      - main
-
   workflow_dispatch:
 
 permissions:
@@ -18,150 +15,101 @@ jobs:
       TARGET_MB: "19"
 
     steps:
-
-      # ============================================
-      # Checkout
-      # ============================================
-      - name: Checkout repository
+      - name: Clone repository
         uses: actions/checkout@v4
 
-      # ============================================
-      # Install dependencies
-      # ============================================
-      - name: Install dependencies
+      - name: Install ffmpeg, yt-dlp, bc
         run: |
           sudo apt-get update
-
-          sudo apt-get install -y \
-            ffmpeg \
-            jq \
-            python3 \
-            python3-pip
-
+          sudo apt-get install -y ffmpeg bc python3 python3-pip
           python3 -m pip install --upgrade pip
           python3 -m pip install -U yt-dlp
 
-      # ============================================
-      # Create cookies file
-      # ============================================
-      - name: Create cookies file
+      - name: Create cookies file from Secret
         run: |
           if [ -n "${{ secrets.YT_COOKIES }}" ]; then
             printf '%s\n' "${{ secrets.YT_COOKIES }}" > cookies.txt
-            echo "Cookies loaded"
-          else
-            echo "No cookies provided"
+            if [ ! -s cookies.txt ]; then
+              echo "❌ فایل کوکی خالی است!"
+              exit 1
+            fi
           fi
 
-      # ============================================
-      # Split playlist
-      # ============================================
-      - name: Split playlist sections
+      - name: Split playlist into long and short temporary files
         run: |
           set -euo pipefail
 
           if [ ! -f playlist.txt ]; then
-            echo "playlist.txt not found"
+            echo "⚠️ فایل playlist.txt یافت نشد. لطفاً آن را در ریشه مخزن ایجاد کنید."
             exit 1
           fi
 
+          rm -f long_temp.txt short_temp.txt
           : > long_temp.txt
           : > short_temp.txt
 
           awk '
             BEGIN { mode = "" }
-
-            /^#long/ {
-              mode = "long"
-              next
-            }
-
-            /^#short/ {
-              mode = "short"
-              next
-            }
-
-            /^#/ { next }
+            /^[[:space:]]*#long[[:space:]]*$/  { mode = "long";  next }
+            /^[[:space:]]*#short[[:space:]]*$/ { mode = "short"; next }
+            /^[[:space:]]*#/ { next }
             NF == 0 { next }
-
             {
-              if (mode == "long")
-                print >> "long_temp.txt"
-
-              if (mode == "short")
-                print >> "short_temp.txt"
+              gsub(/\r$/, "")
+              if (mode == "long")  print >> "long_temp.txt"
+              if (mode == "short") print >> "short_temp.txt"
             }
           ' playlist.txt
 
-          echo "Long URLs: $(wc -l < long_temp.txt || true)"
-          echo "Short URLs: $(wc -l < short_temp.txt || true)"
+          echo "✅ لینک‌های بلند استخراج شده: $(wc -l < long_temp.txt | tr -d ' ') عدد"
+          echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt | tr -d ' ') عدد"
 
       # ============================================
-      # Download videos
+      # دانلود ویدیوهای بلند + تامبنیل
       # ============================================
-      - name: Download videos
+      - name: Download long videos
         run: |
           set -euo pipefail
 
-          mkdir -p downloads/long_videos
-          mkdir -p downloads/short_videos
-
-          download_group() {
-
-            local batch_file="$1"
-            local output_dir="$2"
-
-            [ -s "$batch_file" ] || return 0
-
-            mkdir -p "$output_dir"
-
-            local args=(
-              --batch-file "$batch_file"
-
-              --ignore-errors
-              --continue
-              --no-overwrites
-              --no-playlist
-
-              --write-info-json
-              --write-thumbnail
-              --convert-thumbnails jpg
-
-              --restrict-filenames
-
+          if [ -s long_temp.txt ]; then
+            mkdir -p downloads/long_videos
+            yt-dlp --cookies cookies.txt \
+              --batch-file long_temp.txt \
+              --write-thumbnail \
+              --convert-thumbnails jpg \
+              --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
+              --output "thumbnail:downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
+              --continue \
+              --restrict-filenames \
               --merge-output-format mp4
-
-              --format "bestvideo+bestaudio/best"
-
-              --output "${output_dir}/%(title)s_%(id)s/%(title)s_%(id)s.%(ext)s"
-            )
-
-            echo "Trying without cookies..."
-
-            if yt-dlp "${args[@]}"; then
-              return 0
-            fi
-
-            if [ -s cookies.txt ]; then
-
-              echo "Retrying with cookies..."
-
-              yt-dlp \
-                --cookies cookies.txt \
-                "${args[@]}"
-
-              return 0
-            fi
-
-            echo "Download failed"
-            return 1
-          }
-
-          download_group long_temp.txt downloads/long_videos
-          download_group short_temp.txt downloads/short_videos
+          else
+            echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
+          fi
 
       # ============================================
-      # Split videos
+      # دانلود ویدیوهای کوتاه + تامبنیل
+      # ============================================
+      - name: Download short videos
+        run: |
+          set -euo pipefail
+
+          if [ -s short_temp.txt ]; then
+            mkdir -p downloads/short_videos
+            yt-dlp --cookies cookies.txt \
+              --batch-file short_temp.txt \
+              --write-thumbnail \
+              --convert-thumbnails jpg \
+              --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
+              --output "thumbnail:downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
+              --continue \
+              --restrict-filenames \
+              --merge-output-format mp4
+          else
+            echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
+          fi
+
+      # ============================================
+      # تقسیم ویدیوها به پارت‌های زیر TARGET_MB
       # ============================================
       - name: Split videos into chunks
         run: |
@@ -170,111 +118,116 @@ jobs:
           TARGET_BYTES=$((TARGET_MB * 1024 * 1024))
 
           split_video() {
-
             local input_file="$1"
 
             [ -f "$input_file" ] || return 0
 
-            local dir
-            local base
-            local name
-            local ext
-            local size_bytes
-            local duration
-            local bitrate
-            local segment_time
+            local dir base name ext size_bytes duration segment_time attempt parts_count max_part_size part
 
             dir="$(dirname "$input_file")"
-
             base="$(basename "$input_file")"
-
             name="${base%.*}"
-
             ext="${base##*.}"
 
             size_bytes="$(stat -c%s "$input_file")"
 
             if [ "$size_bytes" -le "$TARGET_BYTES" ]; then
-              echo "No split needed: $input_file"
+              echo "✅ No split needed: $input_file"
               return 0
             fi
-
-            echo "Splitting: $input_file"
 
             duration="$(ffprobe \
               -v error \
               -show_entries format=duration \
               -of default=noprint_wrappers=1:nokey=1 \
-              "$input_file" | awk '{print int($1+0.5)}')"
+              "$input_file" | awk '{print int($1+0.5)}' || true)"
 
-            [ -z "$duration" ] && duration=60
-
-            bitrate=$(( (size_bytes * 8) / duration ))
-
-            segment_time=$(( (TARGET_BYTES * 8) / bitrate ))
-
-            if [ "$segment_time" -lt 5 ]; then
-              segment_time=5
+            if [ -z "${duration:-}" ] || [ "$duration" -le 0 ]; then
+              duration=60
             fi
 
-            echo "Calculated segment time: ${segment_time}s"
+            # زمان اولیه‌ی هر بخش بر اساس نسبت حجم هدف به حجم کل
+            segment_time="$(awk -v target="$TARGET_BYTES" -v size="$size_bytes" -v duration="$duration" '
+              BEGIN {
+                t = (target / size) * duration * 0.95
+                if (t < 3) t = 3
+                printf "%.0f", t
+              }
+            ')"
 
-            rm -f "${dir}/${name}_part"* 2>/dev/null || true
-
-            ffmpeg \
-              -hide_banner \
-              -loglevel error \
-              -y \
-              -i "$input_file" \
-              -map 0 \
-              -c copy \
-              -f segment \
-              -segment_time "$segment_time" \
-              -reset_timestamps 1 \
-              "${dir}/${name}_part%03d.${ext}"
-
-            if ls "${dir}/${name}_part"*".${ext}" >/dev/null 2>&1; then
-              echo "Split successful"
-
-              rm -f "$input_file"
-            else
-              echo "Split failed"
-              exit 1
+            if [ -z "${segment_time:-}" ] || [ "$segment_time" -lt 3 ]; then
+              segment_time=3
             fi
+
+            echo "⚠️ Splitting: $input_file (${size_bytes} bytes) with initial segment_time=${segment_time}s"
+
+            for attempt in 1 2 3 4 5 6; do
+              rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
+
+              ffmpeg -hide_banner -loglevel error -y \
+                -i "$input_file" \
+                -map 0 -c copy \
+                -f segment \
+                -segment_time "$segment_time" \
+                -reset_timestamps 1 \
+                "${dir}/${name}_part%03d.${ext}"
+
+              parts_count=$(find "$dir" -maxdepth 1 -type f -name "${name}_part*.${ext}" | wc -l | tr -d ' ')
+
+              if [ "$parts_count" -eq 0 ]; then
+                echo "⚠️ هیچ پارت خروجی تولید نشد. کاهش زمان بخش..."
+                segment_time=$((segment_time / 2))
+                [ "$segment_time" -lt 3 ] && segment_time=3
+                continue
+              fi
+
+              max_part_size=0
+              while IFS= read -r -d '' part; do
+                part_size=$(stat -c%s "$part")
+                if [ "$part_size" -gt "$max_part_size" ]; then
+                  max_part_size="$part_size"
+                fi
+              done < <(find "$dir" -maxdepth 1 -type f -name "${name}_part*.${ext}" -print0)
+
+              if [ "$max_part_size" -le "$TARGET_BYTES" ]; then
+                echo "✅ Split successful: $input_file"
+                rm -f "$input_file"
+                return 0
+              fi
+
+              echo "⚠️ بعضی پارت‌ها هنوز بزرگ‌تر از TARGET_MB هستند. retry با segment_time کوچکتر..."
+              rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
+              segment_time=$((segment_time * 80 / 100))
+              [ "$segment_time" -lt 3 ] && segment_time=3
+            done
+
+            echo "❌ Split failed to keep parts under ${TARGET_MB}MB: $input_file"
+            exit 1
           }
 
           while IFS= read -r -d '' video; do
-
             case "$video" in
-              *_part*.mp4|*_part*.mkv|*_part*.webm)
+              *_part*.mp4|*_part*.mkv|*_part*.webm|*_part*.mov|*_part*.m4v)
                 continue
-              ;;
+                ;;
             esac
 
             split_video "$video"
-
           done < <(
-            find downloads \
+            find downloads/long_videos downloads/short_videos \
               -type f \
-              \( \
-                -iname "*.mp4" \
-                -o -iname "*.mkv" \
-                -o -iname "*.webm" \
-                -o -iname "*.mov" \
-                -o -iname "*.m4v" \
-              \) \
+              \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) \
               -print0
           )
 
       # ============================================
-      # Generate thumbnails fallback
+      # ساخت thumbnail fallback اگر نبود
       # ============================================
       - name: Generate fallback thumbnails
         run: |
           set -euo pipefail
 
           create_thumbnail() {
-
             local folder="$1"
 
             local existing_thumb
@@ -285,33 +238,26 @@ jobs:
             fi
 
             local video
-            video="$(find "$folder" -maxdepth 1 -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" \) | head -n 1 || true)"
+            video="$(find "$folder" -maxdepth 1 -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) ! -name "*_part*" | head -n 1 || true)"
 
             if [ -z "$video" ]; then
               return 0
             fi
 
-            ffmpeg \
-              -hide_banner \
-              -loglevel error \
-              -y \
+            ffmpeg -hide_banner -loglevel error -y \
               -ss 00:00:01 \
               -i "$video" \
               -frames:v 1 \
+              -q:v 2 \
               "$folder/thumbnail.jpg" || true
           }
 
-          find downloads/long_videos downloads/short_videos \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d | while read -r dir; do
-
+          find downloads/long_videos downloads/short_videos -mindepth 1 -maxdepth 1 -type d | while read -r dir; do
             create_thumbnail "$dir"
-
           done
 
       # ============================================
-      # Build library.json
+      # ساخت library.json برای index.html
       # ============================================
       - name: Build library manifest
         run: |
@@ -322,26 +268,20 @@ jobs:
 
           VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
           IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
-
           ROOT = Path("downloads")
 
           def part_sort_key(path):
               m = re.search(r"_part(\d+)", path.stem)
-              if m:
-                  return int(m.group(1))
-              return 999999
+              return int(m.group(1)) if m else 999999
 
           def scan_section(section_name):
-
               section_dir = ROOT / section_name
-
               if not section_dir.exists():
                   return []
 
               videos = []
 
-              for folder in sorted(section_dir.iterdir()):
-
+              for folder in sorted(section_dir.iterdir(), key=lambda p: p.name.lower()):
                   if not folder.is_dir():
                       continue
 
@@ -376,25 +316,12 @@ jobs:
                       None
                   )
 
-                  meta = {
-                      "title": folder.name
-                  }
-
                   videos.append({
                       "id": folder.name,
-                      "title": meta["title"],
-                      "thumbnail":
-                          str(thumbnail).replace("\\", "/")
-                          if thumbnail else None,
-
-                      "full":
-                          str(full_video).replace("\\", "/")
-                          if full_video else None,
-
-                      "parts": [
-                          str(p).replace("\\", "/")
-                          for p in parts
-                      ]
+                      "title": folder.name,
+                      "thumbnail": str(thumbnail).replace("\\", "/") if thumbnail else None,
+                      "full": str(full_video).replace("\\", "/") if full_video else None,
+                      "parts": [str(p).replace("\\", "/") for p in parts]
                   })
 
               return videos
@@ -402,38 +329,28 @@ jobs:
           manifest = {
               "sections": {
                   "long": scan_section("long_videos"),
-                  "short": scan_section("short_videos")
+                  "short": scan_section("short_videos"),
               }
           }
 
           Path("assets").mkdir(exist_ok=True)
-
           with open("assets/library.json", "w", encoding="utf-8") as f:
-              json.dump(
-                  manifest,
-                  f,
-                  ensure_ascii=False,
-                  indent=2
-              )
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
           PYTHON
 
-      # ============================================
-      # Commit
-      # ============================================
-      - name: Commit changes
+      - name: Commit and push all changes
         run: |
           set -euo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
 
           git add downloads assets/library.json
 
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "Update media library"
-
+          git commit -m "دانلود خودکار ویدیوها، تامبنیل‌ها و تقسیم به قطعات"
           git push
