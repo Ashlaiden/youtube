@@ -1,0 +1,315 @@
+name: build-media-library
+
+on:
+ push:
+   branches: [main]
+ workflow_dispatch:
+
+permissions:
+ contents: write
+
+jobs:
+ build:
+   runs-on: ubuntu-latest
+   env:
+     TARGET_MB: "19" # بعداً فقط همین عدد را عوض کن
+     REPO_OWNER: Ashlaiden
+     REPO_NAME: youtube
+     BRANCH: main
+
+   steps:
+     - name: Checkout
+       uses: actions/checkout@v4
+
+     - name: Install tools
+       run: |
+         sudo apt-get update
+         sudo apt-get install -y ffmpeg python3 python3-pip
+         python3 -m pip install --upgrade pip
+         python3 -m pip install --upgrade yt-dlp
+
+     - name: Prepare cookies file if secret exists
+       run: |
+         if [ -n "${{ secrets.YT_COOKIES }}" ]; then
+           printf '%s' "${{ secrets.YT_COOKIES }}" > cookies.txt
+           if [ ! -s cookies.txt ]; then
+             echo "Cookies secret is empty"
+             exit 1
+           fi
+         fi
+
+     - name: Split playlist into sections
+       run: |
+         set -euo pipefail
+         test -f playlist.txt || { echo "playlist.txt not found"; exit 1; }
+
+         : > long_temp.txt
+         : > short_temp.txt
+
+         awk '
+           BEGIN { mode = "" }
+           /^[[:space:]]*#long[[:space:]]*$/  { mode = "long";  next }
+           /^[[:space:]]*#short[[:space:]]*$/ { mode = "short"; next }
+           /^[[:space:]]*#/ { next }
+           NF == 0 { next }
+           {
+             gsub(/\r$/, "")
+             if (mode == "long")  print >> "long_temp.txt"
+             if (mode == "short") print >> "short_temp.txt"
+           }
+         ' playlist.txt
+
+         echo "Long URLs:  $(wc -l < long_temp.txt || true)"
+         echo "Short URLs: $(wc -l < short_temp.txt || true)"
+
+     - name: Download videos
+       run: |
+         set -euo pipefail
+
+         mkdir -p downloads/long_videos downloads/short_videos assets
+
+         download_group() {
+           local batch_file="$1"
+           local out_dir="$2"
+
+           [ -s "$batch_file" ] || return 0
+
+           local common_args=(
+             --batch-file "$batch_file"
+             --ignore-errors
+             --no-playlist
+             --continue
+             --no-overwrites
+             --write-info-json
+             --write-thumbnail
+             --convert-thumbnails jpg
+             --merge-output-format mp4
+             --restrict-filenames
+             --extractor-args "youtube:player_client=android,web"
+             --output "${out_dir}/%(title)s_%(id)s/%(title)s_%(id)s.%(ext)s"
+           )
+
+           echo "Trying without cookies for $batch_file..."
+           if yt-dlp "${common_args[@]}"; then
+             return 0
+           fi
+
+           if [ -s cookies.txt ]; then
+             echo "Retrying with cookies for $batch_file..."
+             yt-dlp --cookies cookies.txt "${common_args[@]}"
+             return 0
+           fi
+
+           echo "Download failed for $batch_file and no usable cookies were provided."
+           return 1
+         }
+
+         download_group long_temp.txt downloads/long_videos
+         download_group short_temp.txt downloads/short_videos
+
+     - name: Split videos into parts under target size
+       run: |
+         set -euo pipefail
+
+         TARGET_BYTES=$((TARGET_MB * 1024 * 1024))
+
+         split_one_video() {
+           local input_file="$1"
+           local target_bytes="$2"
+
+           [ -f "$input_file" ] || return 0
+
+           local dir base name ext size_bytes duration bitrate seg_time attempt
+           dir="$(dirname "$input_file")"
+           base="$(basename "$input_file")"
+           name="${base%.*}"
+           ext="${base##*.}"
+
+           size_bytes="$(stat -c%s "$input_file")"
+           if [ "$size_bytes" -le "$target_bytes" ]; then
+             return 0
+           fi
+
+           duration="$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 "$input_file" | awk '{print int($1+0.5)}' || true)"
+           if [ -z "${duration:-}" ] || [ "$duration" -le 0 ]; then
+             duration=60
+           fi
+
+           bitrate="$(awk -v s="$size_bytes" -v d="$duration" 'BEGIN { if (d <= 0) print 0; else printf "%.0f", (s * 8) / d }')"
+           if [ -z "${bitrate:-}" ] || [ "$bitrate" -le 0 ]; then
+             bitrate=5000000
+           fi
+
+           seg_time="$(awk -v target="$target_bytes" -v br="$bitrate" 'BEGIN { t=int(((target * 8) / br) * 0.90); if (t < 3) t = 3; print t }')"
+           [ -z "${seg_time:-}" ] && seg_time=10
+
+           attempt=1
+           while [ "$attempt" -le 5 ]; do
+             rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
+
+             ffmpeg -hide_banner -loglevel error -y \
+               -i "$input_file" \
+               -map 0 -c copy \
+               -f segment \
+               -segment_time "$seg_time" \
+               -reset_timestamps 1 \
+               "${dir}/${name}_part%03d.${ext}"
+
+             if ! ls "${dir}/${name}_part"*".${ext}" >/dev/null 2>&1; then
+               seg_time=$((seg_time / 2))
+               [ "$seg_time" -lt 3 ] && seg_time=3
+               attempt=$((attempt + 1))
+               continue
+             fi
+
+             local too_big=0
+             local part_file part_size
+             for part_file in "${dir}/${name}_part"*".${ext}"; do
+               [ -e "$part_file" ] || continue
+               part_size="$(stat -c%s "$part_file")"
+               if [ "$part_size" -gt "$target_bytes" ]; then
+                 too_big=1
+                 break
+               fi
+             done
+
+             if [ "$too_big" -eq 0 ]; then
+               return 0
+             fi
+
+             rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
+             seg_time=$((seg_time / 2))
+             [ "$seg_time" -lt 3 ] && seg_time=3
+             attempt=$((attempt + 1))
+           done
+
+           echo "Could not split under target size: $input_file"
+           return 1
+         }
+
+         for folder in downloads/long_videos downloads/short_videos; do
+           [ -d "$folder" ] || continue
+           while IFS= read -r -d '' video; do
+             case "$video" in
+               *_part*.mp4|*_part*.mkv|*_part*.webm|*_part*.mov|*_part*.m4v) continue ;;
+             esac
+             split_one_video "$video" "$TARGET_BYTES"
+           done < <(find "$folder" -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) -print0)
+         done
+
+     - name: Make thumbnail fallback when missing
+       run: |
+         set -euo pipefail
+
+         make_thumb_if_missing() {
+           local folder="$1"
+           local full_video
+           local thumb
+
+           thumb="$(find "$folder" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) | head -n 1 || true)"
+           if [ -n "${thumb:-}" ]; then
+             return 0
+           fi
+
+           full_video="$(find "$folder" -maxdepth 1 -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) ! -name "*_part*" | head -n 1 || true)"
+           if [ -z "${full_video:-}" ]; then
+             return 0
+           fi
+
+           ffmpeg -hide_banner -loglevel error -y \
+             -ss 00:00:01 -i "$full_video" \
+             -frames:v 1 -q:v 2 \
+             "$folder/thumbnail.jpg" || true
+         }
+
+         find downloads/long_videos downloads/short_videos -mindepth 1 -maxdepth 1 -type d | while read -r d; do
+           make_thumb_if_missing "$d"
+         done
+
+     - name: Build manifest
+       run: |
+         python3 - <<'PY'
+         from pathlib import Path
+         import json, os, re
+         from datetime import datetime, timezone
+
+         root = Path("downloads")
+         video_exts = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
+         img_exts = {".jpg", ".jpeg", ".png", ".webp"}
+
+         def part_key(p: Path):
+             m = re.search(r"_part(\d+)$", p.stem)
+             return (int(m.group(1)) if m else 10**9, p.name.lower())
+
+         def build_section(section_name: str):
+             section_dir = root / section_name
+             items = []
+
+             if not section_dir.exists():
+                 return items
+
+             for folder in sorted([p for p in section_dir.iterdir() if p.is_dir()], key=lambda p: p.name.lower()):
+                 info_file = next(folder.glob("*.info.json"), None)
+                 meta = {}
+                 if info_file and info_file.exists():
+                     try:
+                         meta = json.loads(info_file.read_text(encoding="utf-8"))
+                     except Exception:
+                         meta = {}
+
+                 full_files = sorted(
+                     [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in video_exts and "_part" not in p.stem],
+                     key=lambda p: p.name.lower()
+                 )
+                 part_files = sorted(
+                     [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in video_exts and "_part" in p.stem],
+                     key=part_key
+                 )
+                 thumb_file = next(
+                     (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in img_exts),
+                     None
+                 )
+
+                 items.append({
+                     "id": folder.name,
+                     "kind": "long" if section_name == "long_videos" else "short",
+                     "title": meta.get("title") or folder.name,
+                     "full": f"downloads/{section_name}/{folder.name}/{full_files[0].name}" if full_files else None,
+                     "parts": [f"downloads/{section_name}/{folder.name}/{p.name}" for p in part_files],
+                     "thumbnail": f"downloads/{section_name}/{folder.name}/{thumb_file.name}" if thumb_file else None,
+                     "duration": meta.get("duration"),
+                     "uploader": meta.get("uploader"),
+                     "channel": meta.get("channel"),
+                 })
+
+             return items
+
+         manifest = {
+             "generated_at": datetime.now(timezone.utc).isoformat(),
+             "target_mb": int(os.environ.get("TARGET_MB", "19")),
+             "sections": {
+                 "long": build_section("long_videos"),
+                 "short": build_section("short_videos"),
+             }
+         }
+
+         Path("assets").mkdir(parents=True, exist_ok=True)
+         Path("assets/library.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+         PY
+
+     - name: Commit and push
+       run: |
+         set -euo pipefail
+         git config --local user.email "github-actions@users.noreply.github.com"
+         git config --local user.name "github-actions[bot]"
+
+         git add assets/library.json downloads
+
+         if git diff --cached --quiet; then
+           echo "No changes to commit"
+           exit 0
+         fi
+
+         git commit -m "Update media library"
+         git push
+
