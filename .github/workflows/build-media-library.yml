@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       TARGET_MB: "19"
 
@@ -229,6 +230,25 @@ jobs:
               \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) \
               -print0
           )
+
+      - name: Verify and cleanup oversized originals
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r -d '' video; do
+            size_bytes=$(stat -c%s "$video")
+            if [ "$size_bytes" -gt 104857600 ]; then
+              base="${video%.*}"
+
+              if ls "${base}_part"* >/dev/null 2>&1; then
+                echo "🧹 Removing oversized original: $video"
+                rm -f "$video"
+              else
+                echo "❌ Oversized file still exists and was not split: $video"
+                exit 1
+              fi
+            fi
+          done < <(find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) -print0)
 
       - name: Generate fallback thumbnails
         run: |
