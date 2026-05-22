@@ -1,4 +1,4 @@
-name: build-media-library
+name: ci
 
 on:
   push:
@@ -16,11 +16,9 @@ jobs:
 
     env:
       TARGET_MB: "19"
-      REPO_OWNER: Ashlaiden
-      REPO_NAME: youtube
-      BRANCH: main
 
     steps:
+
       # ============================================
       # Checkout
       # ============================================
@@ -28,15 +26,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ============================================
-      # Node.js برای حل challenge یوتیوب
-      # ============================================
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      # ============================================
-      # نصب ابزارها
+      # Install dependencies
       # ============================================
       - name: Install dependencies
         run: |
@@ -45,33 +35,26 @@ jobs:
           sudo apt-get install -y \
             ffmpeg \
             jq \
-            curl \
             python3 \
             python3-pip
 
           python3 -m pip install --upgrade pip
-
-          python3 -m pip install \
-            --upgrade \
-            yt-dlp
-
-          node -v
-          yt-dlp --version
+          python3 -m pip install -U yt-dlp
 
       # ============================================
-      # ساخت فایل کوکی
+      # Create cookies file
       # ============================================
       - name: Create cookies file
         run: |
           if [ -n "${{ secrets.YT_COOKIES }}" ]; then
             printf '%s\n' "${{ secrets.YT_COOKIES }}" > cookies.txt
-            echo "Cookies file created"
+            echo "Cookies loaded"
           else
-            echo "No cookies secret found"
+            echo "No cookies provided"
           fi
 
       # ============================================
-      # ساخت فایل‌های موقت لینک‌ها
+      # Split playlist
       # ============================================
       - name: Split playlist sections
         run: |
@@ -88,22 +71,20 @@ jobs:
           awk '
             BEGIN { mode = "" }
 
-            /^[[:space:]]*#long[[:space:]]*$/ {
+            /^#long/ {
               mode = "long"
               next
             }
 
-            /^[[:space:]]*#short[[:space:]]*$/ {
+            /^#short/ {
               mode = "short"
               next
             }
 
-            /^[[:space:]]*#/ { next }
+            /^#/ { next }
             NF == 0 { next }
 
             {
-              gsub(/\r$/, "")
-
               if (mode == "long")
                 print >> "long_temp.txt"
 
@@ -116,7 +97,7 @@ jobs:
           echo "Short URLs: $(wc -l < short_temp.txt || true)"
 
       # ============================================
-      # دانلود ویدیوها
+      # Download videos
       # ============================================
       - name: Download videos
         run: |
@@ -124,7 +105,6 @@ jobs:
 
           mkdir -p downloads/long_videos
           mkdir -p downloads/short_videos
-          mkdir -p assets
 
           download_group() {
 
@@ -133,7 +113,9 @@ jobs:
 
             [ -s "$batch_file" ] || return 0
 
-            local common_args=(
+            mkdir -p "$output_dir"
+
+            local args=(
               --batch-file "$batch_file"
 
               --ignore-errors
@@ -141,55 +123,34 @@ jobs:
               --no-overwrites
               --no-playlist
 
-              --extractor-retries infinite
-              --fragment-retries infinite
-              --retry-sleep 5
-
-              --sleep-requests 2
-              --sleep-interval 2
-              --max-sleep-interval 8
-
-              --concurrent-fragments 4
-
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
-
               --write-info-json
               --write-thumbnail
               --convert-thumbnails jpg
 
-              --merge-output-format mp4
-
               --restrict-filenames
 
-              --format "bv*+ba/b"
+              --merge-output-format mp4
+
+              --format "bestvideo+bestaudio/best"
 
               --output "${output_dir}/%(title)s_%(id)s/%(title)s_%(id)s.%(ext)s"
             )
 
-            echo "======================================="
-            echo "Trying WITHOUT cookies..."
-            echo "======================================="
+            echo "Trying without cookies..."
 
-            if yt-dlp \
-              --extractor-args "youtube:player_client=tv_embedded,ios,web" \
-              "${common_args[@]}"
-            then
+            if yt-dlp "${args[@]}"; then
               return 0
             fi
 
             if [ -s cookies.txt ]; then
 
-              echo "======================================="
-              echo "Retrying WITH cookies..."
-              echo "======================================="
+              echo "Retrying with cookies..."
 
-              if yt-dlp \
+              yt-dlp \
                 --cookies cookies.txt \
-                --extractor-args "youtube:player_client=tv,web" \
-                "${common_args[@]}"
-              then
-                return 0
-              fi
+                "${args[@]}"
+
+              return 0
             fi
 
             echo "Download failed"
@@ -200,7 +161,7 @@ jobs:
           download_group short_temp.txt downloads/short_videos
 
       # ============================================
-      # تقسیم ویدیوها
+      # Split videos
       # ============================================
       - name: Split videos into chunks
         run: |
@@ -274,6 +235,8 @@ jobs:
 
             if ls "${dir}/${name}_part"*".${ext}" >/dev/null 2>&1; then
               echo "Split successful"
+
+              rm -f "$input_file"
             else
               echo "Split failed"
               exit 1
@@ -304,7 +267,7 @@ jobs:
           )
 
       # ============================================
-      # ساخت thumbnail fallback
+      # Generate thumbnails fallback
       # ============================================
       - name: Generate fallback thumbnails
         run: |
@@ -348,7 +311,7 @@ jobs:
           done
 
       # ============================================
-      # ساخت library.json
+      # Build library.json
       # ============================================
       - name: Build library manifest
         run: |
@@ -356,7 +319,6 @@ jobs:
           import json
           import re
           from pathlib import Path
-          from datetime import datetime, timezone
 
           VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
           IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -414,21 +376,13 @@ jobs:
                       None
                   )
 
-                  info_json = next(folder.glob("*.info.json"), None)
-
-                  meta = {}
-
-                  if info_json:
-                      try:
-                          meta = json.loads(info_json.read_text(encoding="utf-8"))
-                      except:
-                          meta = {}
+                  meta = {
+                      "title": folder.name
+                  }
 
                   videos.append({
                       "id": folder.name,
-                      "title": meta.get("title", folder.name),
-                      "uploader": meta.get("uploader"),
-                      "duration": meta.get("duration"),
+                      "title": meta["title"],
                       "thumbnail":
                           str(thumbnail).replace("\\", "/")
                           if thumbnail else None,
@@ -446,8 +400,6 @@ jobs:
               return videos
 
           manifest = {
-              "generated_at": datetime.now(timezone.utc).isoformat(),
-              "target_mb": 19,
               "sections": {
                   "long": scan_section("long_videos"),
                   "short": scan_section("short_videos")
@@ -463,12 +415,10 @@ jobs:
                   ensure_ascii=False,
                   indent=2
               )
-
-          print("library.json generated")
           PYTHON
 
       # ============================================
-      # Commit & Push
+      # Commit
       # ============================================
       - name: Commit changes
         run: |
