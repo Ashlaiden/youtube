@@ -1,9 +1,10 @@
---batch-file playlist.txt
---output downloads/%(title)s/%(title)s_%(id)s.%(ext)s
 --continue
-# --write-description
-# --write-info-json
-# --write-thumbnail
-
-# --external-downloader bin/aria2c
-# --external-downloader-args '-c -x 16 -k 1M'
+--ignore-errors
+--no-overwrites
+--write-info-json
+--write-thumbnail
+--convert-thumbnails jpg
+--merge-output-format mp4
+--restrict-filenames
+--extractor-args youtube:player_client=android,web
+--output downloads/%(title)s_%(id)s/%(title)s_%(id)s.%(ext)s
