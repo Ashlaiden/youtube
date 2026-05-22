@@ -6,5 +6,5 @@
 --convert-thumbnails jpg
 --merge-output-format mp4
 --restrict-filenames
---extractor-args youtube:player_client=android,web
+# --extractor-args youtube:player_client=android,web
 --output downloads/%(title)s_%(id)s/%(title)s_%(id)s.%(ext)s
