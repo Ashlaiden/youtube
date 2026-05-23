@@ -210,30 +210,102 @@ jobs:
           set -euo pipefail
 
           python3 << 'PYTHON'
-          import os
           import json
-
-          library = []
-
-          for root, dirs, files in os.walk("downloads"):
-              for file in files:
-                  if file.endswith(".mp4"):
-                      full_path = os.path.join(root, file)
-
-                      preview = None
-
-                      for x in files:
-                          if x.endswith(".jpg"):
-                              preview = os.path.join(root, x).replace("\\", "/")
-                              break
-
-                      library.append({
-                          "video": full_path.replace("\\", "/"),
-                          "preview": preview
-                      })
-
+          import re
+          from pathlib import Path
+          
+          ROOT = Path("downloads")
+          VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
+          IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+          
+          def part_sort_key(path):
+              m = re.search(r"_part(\d+)", path.stem)
+              return int(m.group(1)) if m else 999999
+          
+          def scan_long_section():
+              section_dir = ROOT / "long_videos"
+              if not section_dir.exists():
+                  return []
+          
+              items = []
+          
+              for folder in sorted(section_dir.iterdir(), key=lambda p: p.name.lower()):
+                  if not folder.is_dir():
+                      continue
+          
+                  files = list(folder.iterdir())
+          
+                  thumbnail = next((f for f in files if f.suffix.lower() in IMAGE_EXTS), None)
+                  full_video = next((f for f in files if f.suffix.lower() in VIDEO_EXTS and "_part" not in f.stem), None)
+                  parts = sorted(
+                      [f for f in files if f.suffix.lower() in VIDEO_EXTS and "_part" in f.stem],
+                      key=part_sort_key
+                  )
+          
+                  items.append({
+                      "id": folder.name,
+                      "title": folder.name,
+                      "kind": "long",
+                      "thumbnail": str(thumbnail).replace("\\", "/") if thumbnail else None,
+                      "full": str(full_video).replace("\\", "/") if full_video else None,
+                      "parts": [str(p).replace("\\", "/") for p in parts]
+                  })
+          
+              return items
+          
+          def scan_short_section():
+              section_dir = ROOT / "short_videos"
+              if not section_dir.exists():
+                  return []
+          
+              files = [f for f in section_dir.iterdir() if f.is_file()]
+              groups = {}
+          
+              for f in files:
+                  if f.suffix.lower() not in VIDEO_EXTS | IMAGE_EXTS:
+                      continue
+          
+                  stem = f.stem
+                  base = re.sub(r"_part\d+$", "", stem)
+                  base = re.sub(r"_+$", "", base)
+          
+                  if base not in groups:
+                      groups[base] = {
+                          "id": base,
+                          "title": base,
+                          "kind": "short",
+                          "thumbnail": None,
+                          "full": None,
+                          "parts": []
+                      }
+          
+                  if f.suffix.lower() in IMAGE_EXTS and groups[base]["thumbnail"] is None:
+                      groups[base]["thumbnail"] = str(f).replace("\\", "/")
+          
+                  if f.suffix.lower() in VIDEO_EXTS:
+                      if "_part" in stem:
+                          groups[base]["parts"].append((part_sort_key(f), str(f).replace("\\", "/")))
+                      else:
+                          groups[base]["full"] = str(f).replace("\\", "/")
+          
+              result = []
+              for g in groups.values():
+                  g["parts"] = [p for _, p in sorted(g["parts"], key=lambda x: x[0])]
+                  result.append(g)
+          
+              result.sort(key=lambda x: x["title"].lower())
+              return result
+          
+          manifest = {
+              "sections": {
+                  "long": scan_long_section(),
+                  "short": scan_short_section(),
+              }
+          }
+          
+          Path("assets").mkdir(exist_ok=True)
           with open("assets/library.json", "w", encoding="utf-8") as f:
-              json.dump(library, f, ensure_ascii=False, indent=2)
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
           PYTHON
 
       - name: Commit and push
