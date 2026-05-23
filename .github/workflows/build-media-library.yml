@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: media-library-main
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -140,11 +144,11 @@ jobs:
           AUDIO_BITRATE_KBPS=96
           SAFETY_PERCENT=85
 
-          split_video() {
+          split_copy_first() {
             local input_file="$1"
             [ -f "$input_file" ] || return 0
 
-            local dir base name size_bytes duration parts_needed segment_duration
+            local dir base name size_bytes duration parts_needed segment_time
             dir="$(dirname "$input_file")"
             base="$(basename "$input_file")"
             name="${base%.*}"
@@ -169,84 +173,111 @@ jobs:
             parts_needed=$(( (size_bytes + TARGET_BYTES - 1) / TARGET_BYTES ))
             [ "$parts_needed" -lt 2 ] && parts_needed=2
 
-            echo "⚠️ Splitting: $input_file (${size_bytes} bytes)"
+            segment_time=$(( (duration + parts_needed - 1) / parts_needed ))
+            [ "$segment_time" -lt 3 ] && segment_time=3
 
-            for attempt in 1 2 3 4 5 6; do
-              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
+            echo "⚠️ Fast split first: $input_file (${size_bytes} bytes)"
 
-              segment_duration=$(( (duration + parts_needed - 1) / parts_needed ))
-              [ "$segment_duration" -lt 3 ] && segment_duration=3
+            rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
 
-              local start=0
-              local index=0
-              local all_ok=1
+            ffmpeg \
+              -nostdin \
+              -hide_banner \
+              -loglevel error \
+              -y \
+              -i "$input_file" \
+              -map 0 \
+              -c copy \
+              -f segment \
+              -segment_time "$segment_time" \
+              -reset_timestamps 1 \
+              "${dir}/${name}_part%03d.mp4" || true
 
-              while [ "$start" -lt "$duration" ]; do
-                local part_file part_len target_part_bytes part_vbitrate part_size
+            local any_part=0
+            local needs_reencode=0
+            local part_file part_size
 
-                part_file="${dir}/${name}_part$(printf '%03d' "$index").mp4"
-                part_len=$segment_duration
+            while IFS= read -r -d '' part_file; do
+              any_part=1
+              part_size=$(stat -c%s "$part_file")
+              if [ "$part_size" -gt "$TARGET_BYTES" ]; then
+                needs_reencode=1
+                break
+              fi
+            done < <(find "$dir" -maxdepth 1 -type f -name "${name}_part*.mp4" -print0)
 
-                if [ $((start + part_len)) -gt "$duration" ]; then
-                  part_len=$((duration - start))
-                fi
+            if [ "$any_part" -eq 1 ] && [ "$needs_reencode" -eq 0 ]; then
+              echo "✅ Split successful (copy mode): $input_file"
+              rm -f "$input_file"
+              return 0
+            fi
 
-                [ "$part_len" -lt 1 ] && part_len=1
+            echo "⚠️ Copy split oversized or failed, retrying with re-encode: $input_file"
+            rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
 
-                target_part_bytes=$(( TARGET_BYTES * SAFETY_PERCENT / 100 ))
-                part_vbitrate=$(( (target_part_bytes * 8 / part_len) - (AUDIO_BITRATE_KBPS * 1000) ))
+            local start=0
+            local index=0
+            local all_ok=1
 
-                [ "$part_vbitrate" -lt 300000 ] && part_vbitrate=300000
-                [ "$part_vbitrate" -gt 12000000 ] && part_vbitrate=12000000
+            while [ "$start" -lt "$duration" ]; do
+              local part_len target_part_bytes part_vbitrate
 
-                echo "➡️ Part $((index + 1)): start=${start}s len=${part_len}s bitrate=${part_vbitrate}"
+              part_len=$segment_time
+              if [ $((start + part_len)) -gt "$duration" ]; then
+                part_len=$((duration - start))
+              fi
+              [ "$part_len" -lt 1 ] && part_len=1
 
-                if ! ffmpeg \
-                  -nostdin \
-                  -hide_banner \
-                  -loglevel error \
-                  -y \
-                  -ss "$start" \
-                  -i "$input_file" \
-                  -t "$part_len" \
-                  -map 0:v:0 \
-                  -map 0:a? \
-                  -c:v libx264 \
-                  -preset ultrafast \
-                  -threads 0 \
-                  -pix_fmt yuv420p \
-                  -b:v "$part_vbitrate" \
-                  -maxrate "$part_vbitrate" \
-                  -bufsize $((part_vbitrate * 2)) \
-                  -c:a aac \
-                  -b:a "${AUDIO_BITRATE_KBPS}k" \
-                  -movflags +faststart \
-                  "$part_file"; then
-                  all_ok=0
-                  break
-                fi
+              target_part_bytes=$(( TARGET_BYTES * SAFETY_PERCENT / 100 ))
+              part_vbitrate=$(( (target_part_bytes * 8 / part_len) - (AUDIO_BITRATE_KBPS * 1000) ))
+              [ "$part_vbitrate" -lt 300000 ] && part_vbitrate=300000
+              [ "$part_vbitrate" -gt 12000000 ] && part_vbitrate=12000000
 
-                part_size=$(stat -c%s "$part_file")
-                if [ "$part_size" -gt "$TARGET_BYTES" ]; then
-                  echo "⚠️ Part too large: ${part_size} bytes"
-                  all_ok=0
-                  break
-                fi
+              part_file="${dir}/${name}_part$(printf '%03d' "$index").mp4"
 
-                start=$((start + part_len))
-                index=$((index + 1))
-              done
+              echo "➡️ Re-encode part $((index + 1)): start=${start}s len=${part_len}s bitrate=${part_vbitrate}"
 
-              if [ "$all_ok" -eq 1 ] && ls "${dir}/${name}_part"*.mp4 >/dev/null 2>&1; then
-                echo "✅ Split successful: $input_file"
-                rm -f "$input_file"
-                return 0
+              if ! ffmpeg \
+                -nostdin \
+                -hide_banner \
+                -loglevel error \
+                -y \
+                -ss "$start" \
+                -i "$input_file" \
+                -t "$part_len" \
+                -map 0:v:0 \
+                -map 0:a? \
+                -c:v libx264 \
+                -preset ultrafast \
+                -threads 0 \
+                -pix_fmt yuv420p \
+                -b:v "$part_vbitrate" \
+                -maxrate "$part_vbitrate" \
+                -bufsize $((part_vbitrate * 2)) \
+                -c:a aac \
+                -b:a "${AUDIO_BITRATE_KBPS}k" \
+                -movflags +faststart \
+                "$part_file"; then
+                all_ok=0
+                break
               fi
 
-              echo "⚠️ Retry split..."
-              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
-              parts_needed=$((parts_needed + 1))
+              part_size=$(stat -c%s "$part_file")
+              if [ "$part_size" -gt "$TARGET_BYTES" ]; then
+                echo "⚠️ Part too large: ${part_size} bytes"
+                all_ok=0
+                break
+              fi
+
+              start=$((start + part_len))
+              index=$((index + 1))
             done
+
+            if [ "$all_ok" -eq 1 ] && ls "${dir}/${name}_part"*.mp4 >/dev/null 2>&1; then
+              echo "✅ Split successful (re-encode fallback): $input_file"
+              rm -f "$input_file"
+              return 0
+            fi
 
             echo "❌ Split failed: $input_file"
             exit 1
@@ -256,7 +287,7 @@ jobs:
             case "$video" in
               *_part*.mp4) continue ;;
             esac
-            split_video "$video"
+            split_copy_first "$video"
           done < <(find downloads -type f -iname "*.mp4" -print0)
 
       - name: Generate thumbnails if missing
@@ -417,4 +448,6 @@ jobs:
           fi
 
           git commit -m "Update media library"
-          git push
+
+          git pull --rebase --autostash origin main
+          git push origin main
