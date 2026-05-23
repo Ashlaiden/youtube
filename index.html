@@ -1,562 +1,620 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
- <meta charset="UTF-8" />
- <meta name="viewport" content="width=device-width, initial-scale=1.0" />
- <title>Media Vault</title>
- <link rel="preconnect" href="https://cdn.jsdelivr.net" />
- <link rel="preconnect" href="https://raw.githubusercontent.com" />
- <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
- <style>
-   :root{
-     --bg:#0b0f14;
-     --panel:#111823;
-     --panel-2:#151f2d;
-     --border:#223044;
-     --text:#e7edf7;
-     --muted:#9aa7b8;
-     --accent:#ff2d2d;
-     --accent-2:#ff6b6b;
-     --shadow: 0 16px 40px rgba(0,0,0,.35);
-     --radius: 20px;
-   }
-   *{box-sizing:border-box}
-   html,body{margin:0;padding:0;background:radial-gradient(circle at top, #111827 0, var(--bg) 45%);color:var(--text);font-family:Segoe UI,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
-   a{color:inherit;text-decoration:none}
-   button,input{font:inherit}
-   .app{max-width:1400px;margin:0 auto;padding:18px}
-   .header{
-     position:sticky;top:0;z-index:20;
-     backdrop-filter: blur(12px);
-     background: rgba(11,15,20,.75);
-     border:1px solid rgba(34,48,68,.8);
-     border-radius:24px;
-     box-shadow:var(--shadow);
-     padding:14px 16px;
-     display:grid;
-     grid-template-columns:auto auto 1fr auto;
-     gap:12px;
-     align-items:center;
-     margin-bottom:18px;
-   }
-   .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem}
-   .brand-badge{
-     width:38px;height:38px;border-radius:14px;
-     display:grid;place-items:center;
-     background:linear-gradient(135deg,var(--accent),#ff7a7a);
-     box-shadow:0 10px 24px rgba(255,45,45,.35);
-   }
-   .toolbar{display:flex;gap:8px;flex-wrap:wrap}
-   .chip,.btn,.tab,.domain-btn{
-     border:1px solid var(--border);
-     background:linear-gradient(180deg,var(--panel),var(--panel-2));
-     color:var(--text);
-     border-radius:999px;
-     padding:10px 14px;
-     cursor:pointer;
-     transition:.2s ease;
-     box-shadow:0 6px 18px rgba(0,0,0,.18);
-   }
-   .btn:hover,.tab:hover,.domain-btn:hover,.chip:hover{transform:translateY(-1px);border-color:#355074}
-   .btn.primary,.tab.active,.domain-btn.active{
-     background:linear-gradient(180deg,#ff3d3d,#d41414);
-     border-color:transparent;
-     color:#fff;
-   }
-   .search{
-     width:100%;
-     border-radius:999px;
-     border:1px solid var(--border);
-     background:rgba(17,24,35,.9);
-     color:var(--text);
-     padding:12px 16px;
-     outline:none;
-   }
-   .search::placeholder{color:var(--muted)}
-   .tabs{
-     display:flex;gap:10px;flex-wrap:wrap;
-     margin:0 0 16px;
-   }
-   .hero{
-     display:flex;justify-content:space-between;gap:12px;align-items:center;
-     padding:10px 2px 18px;color:var(--muted);flex-wrap:wrap
-   }
-   .player-wrap{
-     display:none;
-     margin-bottom:18px;
-     background:linear-gradient(180deg,var(--panel),var(--panel-2));
-     border:1px solid var(--border);
-     border-radius:var(--radius);
-     overflow:hidden;
-     box-shadow:var(--shadow);
-   }
-   .player-wrap.visible{display:block}
-   .player{
-     width:100%;
-     aspect-ratio:16/9;
-     background:#000;
-   }
-   .player-meta{
-     padding:14px 16px;
-     display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap
-   }
-   .player-title{font-size:1rem;font-weight:700;line-height:1.4}
-   .grid{
-     display:grid;
-     grid-template-columns:repeat(auto-fill,minmax(250px,1fr));
-     gap:16px;
-   }
-   .card{
-     background:linear-gradient(180deg,var(--panel),var(--panel-2));
-     border:1px solid var(--border);
-     border-radius:24px;
-     overflow:hidden;
-     box-shadow:var(--shadow);
-     transition:.2s ease;
-     cursor:pointer;
-   }
-   .card:hover{transform:translateY(-4px);border-color:#355074}
-   .thumb{
-     position:relative;
-     aspect-ratio:16/9;
-     background:#0b0f14;
-     overflow:hidden;
-   }
-   .thumb img,.thumb video{
-     width:100%;height:100%;object-fit:cover;display:block
-   }
-   .thumb-fallback{
-     width:100%;height:100%;
-     display:grid;place-items:center;
-     background:linear-gradient(135deg,#1c2532,#0f1620);
-     color:#8ea0b8;
-     text-align:center;
-     padding:12px;
-   }
-   .badge{
-     position:absolute;bottom:10px;left:10px;
-     background:rgba(0,0,0,.72);
-     color:#fff;
-     padding:6px 10px;border-radius:999px;
-     font-size:.8rem;
-     backdrop-filter: blur(8px);
-   }
-   .card-body{padding:14px}
-   .title{
-     font-size:.98rem;font-weight:700;line-height:1.5;
-     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-     min-height:3rem;
-   }
-   .meta{margin-top:8px;color:var(--muted);font-size:.82rem;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-   .actions .btn{padding:9px 12px;font-size:.88rem}
-   .state{
-     padding:56px 20px;
-     text-align:center;
-     color:var(--muted);
-   }
-   .spinner{
-     width:42px;height:42px;border-radius:50%;
-     border:3px solid rgba(255,255,255,.12);
-     border-top-color:var(--accent);
-     margin:0 auto 14px;
-     animation:spin 1s linear infinite;
-   }
-   @keyframes spin{to{transform:rotate(360deg)}}
-   @media (max-width: 900px){
-     .header{grid-template-columns:1fr;align-items:stretch}
-     .brand{justify-content:flex-start}
-   }
- </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Media Vault</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="preconnect" href="https://raw.githubusercontent.com" />
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --panel:#111823;
+      --panel-2:#151f2d;
+      --border:#223044;
+      --text:#e7edf7;
+      --muted:#9aa7b8;
+      --accent:#ff2d2d;
+      --shadow:0 16px 40px rgba(0,0,0,.35);
+      --radius:20px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:radial-gradient(circle at top, #111827 0, var(--bg) 45%);color:var(--text);font-family:Segoe UI,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
+    a{color:inherit;text-decoration:none}
+    button,input{font:inherit}
+    .app{max-width:1400px;margin:0 auto;padding:18px}
+    .header{
+      position:sticky;top:0;z-index:20;
+      backdrop-filter:blur(12px);
+      background:rgba(11,15,20,.75);
+      border:1px solid rgba(34,48,68,.8);
+      border-radius:24px;
+      box-shadow:var(--shadow);
+      padding:14px 16px;
+      display:grid;
+      grid-template-columns:auto auto 1fr auto;
+      gap:12px;
+      align-items:center;
+      margin-bottom:18px;
+    }
+    .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem}
+    .brand-badge{
+      width:38px;height:38px;border-radius:14px;
+      display:grid;place-items:center;
+      background:linear-gradient(135deg,var(--accent),#ff7a7a);
+      box-shadow:0 10px 24px rgba(255,45,45,.35);
+    }
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .btn,.tab,.domain-btn{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      color:var(--text);
+      border-radius:999px;
+      padding:10px 14px;
+      cursor:pointer;
+      transition:.2s ease;
+      box-shadow:0 6px 18px rgba(0,0,0,.18);
+    }
+    .btn:hover,.tab:hover,.domain-btn:hover{transform:translateY(-1px);border-color:#355074}
+    .btn.primary,.tab.active,.domain-btn.active{
+      background:linear-gradient(180deg,#ff3d3d,#d41414);
+      border-color:transparent;
+      color:#fff;
+    }
+    .search{
+      width:100%;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:rgba(17,24,35,.9);
+      color:var(--text);
+      padding:12px 16px;
+      outline:none;
+    }
+    .search::placeholder{color:var(--muted)}
+    .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+    .hero{
+      display:flex;justify-content:space-between;gap:12px;align-items:center;
+      padding:10px 2px 18px;color:var(--muted);flex-wrap:wrap
+    }
+    .player-wrap{
+      display:none;
+      margin-bottom:18px;
+      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      overflow:hidden;
+      box-shadow:var(--shadow);
+    }
+    .player-wrap.visible{display:block}
+    .player{
+      width:100%;
+      aspect-ratio:16/9;
+      background:#000;
+    }
+    .player-meta{
+      padding:14px 16px;
+      display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap
+    }
+    .player-title{font-size:1rem;font-weight:700;line-height:1.4}
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(250px,1fr));
+      gap:16px;
+    }
+    .card{
+      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      border:1px solid var(--border);
+      border-radius:24px;
+      overflow:hidden;
+      box-shadow:var(--shadow);
+      transition:.2s ease;
+      cursor:pointer;
+    }
+    .card:hover{transform:translateY(-4px);border-color:#355074}
+    .thumb{
+      position:relative;
+      aspect-ratio:16/9;
+      background:#0b0f14;
+      overflow:hidden;
+    }
+    .thumb img,.thumb video{
+      width:100%;height:100%;object-fit:cover;display:block
+    }
+    .thumb-fallback{
+      width:100%;height:100%;
+      display:grid;place-items:center;
+      background:linear-gradient(135deg,#1c2532,#0f1620);
+      color:#8ea0b8;
+      text-align:center;
+      padding:12px;
+    }
+    .badge{
+      position:absolute;bottom:10px;left:10px;
+      background:rgba(0,0,0,.72);
+      color:#fff;
+      padding:6px 10px;border-radius:999px;
+      font-size:.8rem;
+      backdrop-filter:blur(8px);
+    }
+    .card-body{padding:14px}
+    .title{
+      font-size:.98rem;font-weight:700;line-height:1.5;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+      min-height:3rem;
+    }
+    .meta{margin-top:8px;color:var(--muted);font-size:.82rem;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .actions .btn{padding:9px 12px;font-size:.88rem}
+    .state{
+      padding:56px 20px;
+      text-align:center;
+      color:var(--muted);
+    }
+    .spinner{
+      width:42px;height:42px;border-radius:50%;
+      border:3px solid rgba(255,255,255,.12);
+      border-top-color:var(--accent);
+      margin:0 auto 14px;
+      animation:spin 1s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .parts-box{
+      padding:0 16px 16px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .part-chip{
+      border:1px solid var(--border);
+      background:rgba(17,24,35,.95);
+      color:var(--text);
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:.85rem;
+      cursor:pointer;
+    }
+    .part-chip.active{
+      background:linear-gradient(180deg,#ff3d3d,#d41414);
+      border-color:transparent;
+      color:#fff;
+    }
+    @media (max-width: 900px){
+      .header{grid-template-columns:1fr;align-items:stretch}
+      .brand{justify-content:flex-start}
+    }
+  </style>
 </head>
 <body>
- <div class="app">
-   <div class="header">
-     <div class="brand">
-       <div class="brand-badge">▶</div>
-       <div>
-         <div>Media Vault</div>
-         <div style="font-size:.8rem;color:var(--muted);font-weight:500">GitHub Pages + jsDelivr / Raw</div>
-       </div>
-     </div>
+  <div class="app">
+    <div class="header">
+      <div class="brand">
+        <div class="brand-badge">▶</div>
+        <div>
+          <div>Media Vault</div>
+          <div style="font-size:.8rem;color:var(--muted);font-weight:500">GitHub Pages + jsDelivr / Raw</div>
+        </div>
+      </div>
 
-     <div class="toolbar">
-       <button class="btn" id="homeBtn">خانه</button>
-       <button class="btn" id="backBtn">بازگشت</button>
-     </div>
+      <div class="toolbar">
+        <button class="btn" id="homeBtn">خانه</button>
+        <button class="btn" id="backBtn">بازگشت</button>
+      </div>
 
-     <input id="searchInput" class="search" type="search" placeholder="جستجو بین ویدیوها..." />
+      <input id="searchInput" class="search" type="search" placeholder="جستجو بین ویدیوها..." />
 
-     <div class="toolbar" id="domainSwitch">
-       <button class="domain-btn active" data-domain="pages">Pages</button>
-       <button class="domain-btn" data-domain="jsdelivr">jsDelivr</button>
-       <button class="domain-btn" data-domain="raw">Raw</button>
-     </div>
-   </div>
+      <div class="toolbar" id="domainSwitch">
+        <button class="domain-btn active" data-domain="pages">Pages</button>
+        <button class="domain-btn" data-domain="jsdelivr">jsDelivr</button>
+        <button class="domain-btn" data-domain="raw">Raw</button>
+      </div>
+    </div>
 
-   <div class="hero">
-     <div id="pathLabel">کتابخانه</div>
-     <div id="countLabel">—</div>
-   </div>
+    <div class="hero">
+      <div id="pathLabel">کتابخانه</div>
+      <div id="countLabel">—</div>
+    </div>
 
-   <div class="tabs">
-     <button class="tab active" data-tab="long">ویدیوهای بلند</button>
-     <button class="tab" data-tab="short">Shorts</button>
-   </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="long">ویدیوهای بلند</button>
+      <button class="tab" data-tab="short">Shorts</button>
+    </div>
 
-   <div class="player-wrap" id="playerWrap">
-     <video id="player" class="player" controls playsinline crossorigin="anonymous"></video>
-     <div class="player-meta">
-       <div class="player-title" id="playerTitle">—</div>
-       <a id="downloadLink" class="btn primary" href="#" target="_blank" rel="noopener">دانلود فایل کامل</a>
-     </div>
-   </div>
+    <div class="player-wrap" id="playerWrap">
+      <video id="player" class="player" controls playsinline preload="metadata" crossorigin="anonymous"></video>
+      <div class="player-meta">
+        <div class="player-title" id="playerTitle">—</div>
+        <div class="toolbar">
+          <a id="downloadLink" class="btn primary" href="#" target="_blank" rel="noopener">دانلود</a>
+          <button id="downloadAllBtn" class="btn" style="display:none;">دانلود همه پارت‌ها</button>
+        </div>
+      </div>
+      <div class="parts-box" id="partsBox"></div>
+    </div>
 
-   <div id="content">
-     <div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>
-   </div>
- </div>
+    <div id="content">
+      <div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>
+    </div>
+  </div>
 
- <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
- <script>
-   const REPO_OWNER = "Ashlaiden";
-   const REPO_NAME = "youtube";
-   const BRANCH = "main";
+  <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+  <script>
+    const REPO_OWNER = "Ashlaiden";
+    const REPO_NAME = "youtube";
+    const BRANCH = "main";
 
-   const SOURCE_URLS = {
-     pages: (path) => `./${path}`,
-     jsdelivr: (path) => `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${BRANCH}/${path}`,
-     raw: (path) => `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${path}`,
-   };
+    const SOURCE_URLS = {
+      pages: (path) => `./${path}`,
+      jsdelivr: (path) => `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${BRANCH}/${path}`,
+      raw: (path) => `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${path}`,
+    };
 
-   const state = {
-     source: "pages",
-     tab: "long",
-     library: null,
-     query: "",
-     currentPlaylist: [],
-     currentIndex: 0,
-     player: null,
-   };
+    const state = {
+      source: "pages",
+      tab: "long",
+      library: null,
+      query: "",
+      player: null,
+      activeItem: null,
+      activePlaylist: [],
+      activeIndex: 0,
+    };
 
-   const el = {
-     content: document.getElementById("content"),
-     searchInput: document.getElementById("searchInput"),
-     pathLabel: document.getElementById("pathLabel"),
-     countLabel: document.getElementById("countLabel"),
-     tabs: [...document.querySelectorAll(".tab")],
-     domainBtns: [...document.querySelectorAll(".domain-btn")],
-     playerWrap: document.getElementById("playerWrap"),
-     playerTitle: document.getElementById("playerTitle"),
-     player: document.getElementById("player"),
-     downloadLink: document.getElementById("downloadLink"),
-   };
+    const el = {
+      content: document.getElementById("content"),
+      searchInput: document.getElementById("searchInput"),
+      pathLabel: document.getElementById("pathLabel"),
+      countLabel: document.getElementById("countLabel"),
+      tabs: [...document.querySelectorAll(".tab")],
+      domainBtns: [...document.querySelectorAll(".domain-btn")],
+      playerWrap: document.getElementById("playerWrap"),
+      playerTitle: document.getElementById("playerTitle"),
+      player: document.getElementById("player"),
+      downloadLink: document.getElementById("downloadLink"),
+      downloadAllBtn: document.getElementById("downloadAllBtn"),
+      partsBox: document.getElementById("partsBox"),
+    };
 
-   function assetUrl(path) {
-     if (!path) return "";
-     return SOURCE_URLS[state.source](path);
-   }
+    function assetUrl(path) {
+      if (!path) return "";
+      return SOURCE_URLS[state.source](path);
+    }
 
-   function manifestUrl() {
-     return assetUrl("assets/library.json");
-   }
+    function manifestUrl() {
+      return assetUrl("assets/library.json");
+    }
 
-   function videoLabel(kind) {
-     return kind === "long" ? "ویدیو بلند" : "Short";
-   }
+    function normalizeItem(item, kind) {
+      return {
+        id: item.id || item.title || item.full || Math.random().toString(36).slice(2),
+        title: item.title || item.id || "بدون عنوان",
+        kind: item.kind || kind,
+        thumbnail: item.thumbnail || null,
+        full: item.full || null,
+        parts: Array.isArray(item.parts) ? item.parts : [],
+      };
+    }
 
-   function isImage(name = "") {
-     return /\.(jpg|jpeg|png|webp)$/i.test(name);
-   }
+    function videoLabel(kind) {
+      return kind === "long" ? "ویدیو بلند" : "Short";
+    }
 
-   function makeFallbackHTML(item) {
-     const icon = item.kind === "long" ? "🎬" : "📱";
-     const count = item.parts?.length || 0;
-     return `
-       <div class="thumb-fallback">
-         <div>
-           <div style="font-size:2rem">${icon}</div>
-           <div style="margin-top:8px">${count ? `${count} پارت` : "بدون پارت"}</div>
-         </div>
-       </div>
-     `;
-   }
+    function makeFallbackHTML(item) {
+      const icon = item.kind === "long" ? "🎬" : "📱";
+      const count = item.parts?.length || 0;
+      return `
+        <div class="thumb-fallback">
+          <div>
+            <div style="font-size:2rem">${icon}</div>
+            <div style="margin-top:8px">${count ? `${count} پارت` : "بدون پارت"}</div>
+          </div>
+        </div>
+      `;
+    }
 
-   async function capturePoster(url) {
-     return new Promise((resolve) => {
-       const video = document.createElement("video");
-       video.crossOrigin = "anonymous";
-       video.muted = true;
-       video.playsInline = true;
-       video.preload = "auto";
-       video.src = url;
+    async function capturePoster(url) {
+      return new Promise((resolve) => {
+        const video = document.createElement("video");
+        video.crossOrigin = "anonymous";
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = url;
 
-       const cleanup = () => {
-         video.removeAttribute("src");
-         video.load();
-       };
+        const cleanup = () => {
+          video.removeAttribute("src");
+          video.load();
+        };
 
-       video.addEventListener("error", () => { cleanup(); resolve(null); }, { once: true });
-       video.addEventListener("loadeddata", async () => {
-         try {
-           video.currentTime = Math.min(1, Math.max(0.1, (video.duration || 2) * 0.08));
-         } catch {
-           cleanup();
-           resolve(null);
-         }
-       }, { once: true });
+        video.addEventListener("error", () => { cleanup(); resolve(null); }, { once: true });
+        video.addEventListener("loadeddata", async () => {
+          try {
+            video.currentTime = Math.min(1, Math.max(0.1, (video.duration || 2) * 0.08));
+          } catch {
+            cleanup();
+            resolve(null);
+          }
+        }, { once: true });
 
-       video.addEventListener("seeked", () => {
-         try {
-           const canvas = document.createElement("canvas");
-           canvas.width = video.videoWidth || 1280;
-           canvas.height = video.videoHeight || 720;
-           const ctx = canvas.getContext("2d");
-           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-           const data = canvas.toDataURL("image/jpeg", 0.82);
-           cleanup();
-           resolve(data);
-         } catch {
-           cleanup();
-           resolve(null);
-         }
-       }, { once: true });
-     });
-   }
+        video.addEventListener("seeked", () => {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const data = canvas.toDataURL("image/jpeg", 0.82);
+            cleanup();
+            resolve(data);
+          } catch {
+            cleanup();
+            resolve(null);
+          }
+        }, { once: true });
+      });
+    }
 
-   async function enhanceThumbnail(img, item) {
-     if (item.thumbnail) return;
-     const first = item.parts?.[0] || item.full;
-     if (!first) return;
-     try {
-       const poster = await capturePoster(assetUrl(first));
-       if (poster) img.src = poster;
-     } catch {}
-   }
+    async function enhanceThumbnail(img, item) {
+      if (item.thumbnail) return;
+      const first = item.parts?.[0] || item.full;
+      if (!first) return;
+      try {
+        const poster = await capturePoster(assetUrl(first));
+        if (poster) img.src = poster;
+      } catch {}
+    }
 
-   function render(items) {
-     const filtered = items.filter((item) => {
-       const q = state.query.trim().toLowerCase();
-       if (!q) return true;
-       return [
-         item.title,
-         item.id,
-         item.kind,
-         item.uploader,
-         item.channel
-       ].some(v => (v || "").toString().toLowerCase().includes(q));
-     });
+    function currentItems() {
+      if (!state.library) return [];
+      return (state.library.sections?.[state.tab] || []).map(x => normalizeItem(x, state.tab));
+    }
 
-     el.pathLabel.textContent = state.tab === "long" ? "📁 ویدیوهای بلند" : "📱 Shorts";
-     el.countLabel.textContent = `${filtered.length} مورد`;
+    function render(items) {
+      const filtered = items.filter((item) => {
+        const q = state.query.trim().toLowerCase();
+        if (!q) return true;
+        return [item.title, item.id, item.kind].some(v => (v || "").toString().toLowerCase().includes(q));
+      });
 
-     if (!filtered.length) {
-       el.content.innerHTML = `<div class="state">چیزی پیدا نشد.</div>`;
-       return;
-     }
+      el.pathLabel.textContent = state.tab === "long" ? "📁 ویدیوهای بلند" : "📱 Shorts";
+      el.countLabel.textContent = `${filtered.length} مورد`;
 
-     const grid = document.createElement("div");
-     grid.className = "grid";
+      if (!filtered.length) {
+        el.content.innerHTML = `<div class="state">چیزی پیدا نشد.</div>`;
+        return;
+      }
 
-     for (const item of filtered) {
-       const card = document.createElement("div");
-       card.className = "card";
+      const grid = document.createElement("div");
+      grid.className = "grid";
 
-       const thumb = document.createElement("div");
-       thumb.className = "thumb";
+      for (const item of filtered) {
+        const card = document.createElement("div");
+        card.className = "card";
 
-       if (item.thumbnail) {
-         const img = document.createElement("img");
-         img.loading = "lazy";
-         img.alt = item.title;
-         img.src = assetUrl(item.thumbnail);
-         img.onerror = async () => {
-           thumb.innerHTML = makeFallbackHTML(item);
-           await enhanceThumbnail(img, item);
-         };
-         thumb.appendChild(img);
-       } else {
-         thumb.innerHTML = makeFallbackHTML(item);
-         thumb.addEventListener("mouseenter", async () => {
-           if (thumb.dataset.done === "1") return;
-           thumb.dataset.done = "1";
-           const existing = thumb.querySelector("img");
-           if (existing) return;
-           const img = document.createElement("img");
-           img.alt = item.title;
-           img.loading = "lazy";
-           thumb.innerHTML = "";
-           thumb.appendChild(img);
-           await enhanceThumbnail(img, item);
-           if (!img.src) {
-             thumb.innerHTML = makeFallbackHTML(item);
-           }
-         }, { once: true });
-       }
+        const thumb = document.createElement("div");
+        thumb.className = "thumb";
 
-       const badge = document.createElement("div");
-       badge.className = "badge";
-       badge.textContent = `${item.parts?.length || 0} پارت`;
-       thumb.appendChild(badge);
+        if (item.thumbnail) {
+          const img = document.createElement("img");
+          img.loading = "lazy";
+          img.alt = item.title;
+          img.src = assetUrl(item.thumbnail);
+          img.onerror = async () => {
+            thumb.innerHTML = makeFallbackHTML(item);
+            await enhanceThumbnail(img, item);
+          };
+          thumb.appendChild(img);
+        } else {
+          thumb.innerHTML = makeFallbackHTML(item);
+          thumb.addEventListener("mouseenter", async () => {
+            if (thumb.dataset.done === "1") return;
+            thumb.dataset.done = "1";
+            const img = document.createElement("img");
+            img.alt = item.title;
+            img.loading = "lazy";
+            thumb.innerHTML = "";
+            thumb.appendChild(img);
+            await enhanceThumbnail(img, item);
+            if (!img.src) thumb.innerHTML = makeFallbackHTML(item);
+          }, { once: true });
+        }
 
-       const body = document.createElement("div");
-       body.className = "card-body";
+        const badge = document.createElement("div");
+        badge.className = "badge";
+        badge.textContent = item.parts?.length > 1 ? `${item.parts.length} پارت` : "تک فایل";
+        thumb.appendChild(badge);
 
-       const title = document.createElement("div");
-       title.className = "title";
-       title.textContent = item.title || item.id;
+        const body = document.createElement("div");
+        body.className = "card-body";
 
-       const meta = document.createElement("div");
-       meta.className = "meta";
-       meta.innerHTML = `
-         <span>${videoLabel(item.kind)}</span>
-         <span>${item.duration ? `${Math.round(item.duration)} ثانیه` : ""}</span>
-       `;
+        const title = document.createElement("div");
+        title.className = "title";
+        title.textContent = item.title;
 
-       const actions = document.createElement("div");
-       actions.className = "actions";
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.innerHTML = `
+          <span>${videoLabel(item.kind)}</span>
+          <span>${item.parts?.length || 0} فایل</span>
+        `;
 
-       const playBtn = document.createElement("button");
-       playBtn.className = "btn primary";
-       playBtn.textContent = "پخش";
-       playBtn.addEventListener("click", (e) => {
-         e.stopPropagation();
-         playItem(item);
-       });
+        const actions = document.createElement("div");
+        actions.className = "actions";
 
-       const downloadBtn = document.createElement("a");
-       downloadBtn.className = "btn";
-       downloadBtn.textContent = "دانلود";
-       downloadBtn.href = assetUrl(item.full || item.parts?.[0]);
-       downloadBtn.target = "_blank";
-       downloadBtn.rel = "noopener";
-       downloadBtn.addEventListener("click", (e) => e.stopPropagation());
+        const playBtn = document.createElement("button");
+        playBtn.className = "btn primary";
+        playBtn.textContent = "پخش";
+        playBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          playItem(item);
+        });
 
-       actions.appendChild(playBtn);
-       actions.appendChild(downloadBtn);
+        const downloadBtn = document.createElement("a");
+        downloadBtn.className = "btn";
+        downloadBtn.textContent = item.full ? "دانلود" : "دانلود پارت‌ها";
+        downloadBtn.href = assetUrl(item.full || item.parts?.[0]);
+        downloadBtn.target = "_blank";
+        downloadBtn.rel = "noopener";
+        downloadBtn.addEventListener("click", (e) => e.stopPropagation());
 
-       body.appendChild(title);
-       body.appendChild(meta);
-       body.appendChild(actions);
+        actions.appendChild(playBtn);
+        actions.appendChild(downloadBtn);
 
-       card.appendChild(thumb);
-       card.appendChild(body);
-       card.addEventListener("click", () => playItem(item));
-       grid.appendChild(card);
-     }
+        body.appendChild(title);
+        body.appendChild(meta);
+        body.appendChild(actions);
 
-     el.content.innerHTML = "";
-     el.content.appendChild(grid);
-   }
+        card.appendChild(thumb);
+        card.appendChild(body);
+        card.addEventListener("click", () => playItem(item));
+        grid.appendChild(card);
+      }
 
-   function setPlayerSource(url, title) {
-     el.player.src = url;
-     el.playerTitle.textContent = title;
-     el.playerWrap.classList.add("visible");
-     el.player.load();
+      el.content.innerHTML = "";
+      el.content.appendChild(grid);
+    }
 
-     if (!state.player) {
-       state.player = new Plyr(el.player, {
-         controls: ["play-large", "play", "progress", "current-time", "mute", "volume", "settings", "fullscreen"]
-       });
-     }
-   }
+    function setPartChips(item, playlist) {
+      el.partsBox.innerHTML = "";
 
-   function playItem(item) {
-     const playlist = item.parts?.length ? item.parts : (item.full ? [item.full] : []);
-     if (!playlist.length) return;
+      if (playlist.length <= 1) return;
 
-     state.currentPlaylist = playlist;
-     state.currentIndex = 0;
+      playlist.forEach((part, idx) => {
+        const chip = document.createElement("button");
+        chip.className = "part-chip" + (idx === state.activeIndex ? " active" : "");
+        chip.textContent = `پارت ${idx + 1}`;
+        chip.addEventListener("click", () => playPart(item, idx, playlist));
+        el.partsBox.appendChild(chip);
+      });
+    }
 
-     const playIndex = (index) => {
-       if (index >= state.currentPlaylist.length) return;
-       state.currentIndex = index;
-       const currentUrl = assetUrl(state.currentPlaylist[index]);
-       const suffix = state.currentPlaylist.length > 1
-         ? ` (پارت ${index + 1} از ${state.currentPlaylist.length})`
-         : "";
-       setPlayerSource(currentUrl, `${item.title}${suffix}`);
+    function setupDownloadControls(item, playlist) {
+      el.downloadLink.href = assetUrl(item.full || playlist[0]);
+      el.downloadLink.style.display = "inline-flex";
 
-       el.downloadLink.href = assetUrl(item.full || state.currentPlaylist[0]);
-       el.downloadLink.download = "";
+      if (item.full) {
+        el.downloadAllBtn.style.display = "none";
+        return;
+      }
 
-       const onEnded = () => {
-         el.player.removeEventListener("ended", onEnded);
-         playIndex(index + 1);
-       };
-       el.player.addEventListener("ended", onEnded, { once: true });
+      if (playlist.length > 1) {
+        el.downloadAllBtn.style.display = "inline-flex";
+        el.downloadAllBtn.onclick = () => {
+          playlist.forEach((p, i) => {
+            setTimeout(() => {
+              const a = document.createElement("a");
+              a.href = assetUrl(p);
+              a.download = "";
+              a.target = "_blank";
+              a.rel = "noopener";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            }, i * 700);
+          });
+        };
+      } else {
+        el.downloadAllBtn.style.display = "none";
+      }
+    }
 
-       el.player.play().catch(() => {});
-     };
+    function setPlayerSource(url, title) {
+      el.player.src = url;
+      el.playerTitle.textContent = title;
+      el.playerWrap.classList.add("visible");
+      el.player.load();
 
-     playIndex(0);
-   }
+      if (!state.player) {
+        state.player = new Plyr(el.player, {
+          controls: ["play-large", "play", "progress", "current-time", "mute", "volume", "settings", "fullscreen"]
+        });
+      }
+    }
 
-   async function loadLibrary() {
-     const res = await fetch(manifestUrl(), { cache: "no-store" });
-     if (!res.ok) {
-       throw new Error(`Failed to load manifest: ${res.status}`);
-     }
-     return await res.json();
-   }
+    function playPart(item, index, playlist) {
+      state.activeItem = item;
+      state.activePlaylist = playlist;
+      state.activeIndex = index;
 
-   function currentItems() {
-     if (!state.library) return [];
-     return state.library.sections?.[state.tab] || [];
-   }
+      const currentUrl = assetUrl(playlist[index]);
+      const suffix = playlist.length > 1 ? ` (پارت ${index + 1} از ${playlist.length})` : "";
 
-   async function reload() {
-     el.content.innerHTML = `<div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>`;
-     try {
-       state.library = await loadLibrary();
-       render(currentItems());
-     } catch (err) {
-       console.error(err);
-       el.content.innerHTML = `<div class="state">لود نشد. مسیر manifest یا branch را چک کن.</div>`;
-     }
-   }
+      setPlayerSource(currentUrl, `${item.title}${suffix}`);
+      setPartChips(item, playlist);
+      setupDownloadControls(item, playlist);
 
-   el.searchInput.addEventListener("input", () => {
-     state.query = el.searchInput.value || "";
-     render(currentItems());
-   });
+      const onEnded = () => {
+        if (index + 1 < playlist.length) {
+          playPart(item, index + 1, playlist);
+        }
+      };
 
-   el.tabs.forEach(btn => {
-     btn.addEventListener("click", async () => {
-       el.tabs.forEach(b => b.classList.remove("active"));
-       btn.classList.add("active");
-       state.tab = btn.dataset.tab;
-       render(currentItems());
-     });
-   });
+      el.player.onended = null;
+      el.player.addEventListener("ended", onEnded, { once: true });
 
-   el.domainBtns.forEach(btn => {
-     btn.addEventListener("click", async () => {
-       el.domainBtns.forEach(b => b.classList.remove("active"));
-       btn.classList.add("active");
-       state.source = btn.dataset.domain;
-       await reload();
-     });
-   });
+      el.player.play().catch(() => {});
+    }
 
-   document.getElementById("homeBtn").addEventListener("click", () => {
-     state.query = "";
-     el.searchInput.value = "";
-     state.tab = "long";
-     el.tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === "long"));
-     render(currentItems());
-     window.scrollTo({ top: 0, behavior: "smooth" });
-   });
+    function playItem(item) {
+      const playlist = item.parts && item.parts.length ? item.parts : (item.full ? [item.full] : []);
+      if (!playlist.length) return;
+      playPart(item, 0, playlist);
+    }
 
-   document.getElementById("backBtn").addEventListener("click", () => {
-     history.back();
-   });
+    async function loadLibrary() {
+      const res = await fetch(manifestUrl(), { cache: "no-store" });
+      if (!res.ok) throw new Error(`Failed to load manifest: ${res.status}`);
+      return await res.json();
+    }
 
-   (async function init() {
-     await reload();
-   })();
- </script>
+    async function reload() {
+      el.content.innerHTML = `<div class="state"><div class="spinner"></div><div>در حال بارگذاری...</div></div>`;
+      try {
+        state.library = await loadLibrary();
+        render(currentItems());
+      } catch (err) {
+        console.error(err);
+        el.content.innerHTML = `<div class="state">لود نشد. مسیر manifest یا branch را چک کن.</div>`;
+      }
+    }
+
+    el.searchInput.addEventListener("input", () => {
+      state.query = el.searchInput.value || "";
+      render(currentItems());
+    });
+
+    el.tabs.forEach(btn => {
+      btn.addEventListener("click", async () => {
+        el.tabs.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.tab = btn.dataset.tab;
+        render(currentItems());
+      });
+    });
+
+    el.domainBtns.forEach(btn => {
+      btn.addEventListener("click", async () => {
+        el.domainBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.source = btn.dataset.domain;
+        await reload();
+      });
+    });
+
+    document.getElementById("homeBtn").addEventListener("click", () => {
+      state.query = "";
+      el.searchInput.value = "";
+      state.tab = "long";
+      el.tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === "long"));
+      render(currentItems());
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    document.getElementById("backBtn").addEventListener("click", () => history.back());
+
+    (async function init() {
+      await reload();
+    })();
+  </script>
 </body>
 </html>
-
