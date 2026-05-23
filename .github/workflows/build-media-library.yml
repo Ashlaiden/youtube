@@ -70,21 +70,16 @@ jobs:
           echo "✅ لینک‌های بلند استخراج شده: $(wc -l < long_temp.txt | tr -d ' ') عدد"
           echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt | tr -d ' ') عدد"
 
+      # ============================================
+      # دانلود ویدیوهای بلند + تامبنیل
+      # ============================================
       - name: Download long videos
         run: |
           set -euo pipefail
 
           if [ -s long_temp.txt ]; then
             mkdir -p downloads/long_videos
-
-            COOKIE_ARGS=()
-            if [ -s cookies.txt ]; then
-              COOKIE_ARGS=(--cookies cookies.txt)
-            fi
-
-            yt-dlp \
-              --js-runtimes node \
-              "${COOKIE_ARGS[@]}" \
+            yt-dlp --cookies cookies.txt \
               --batch-file long_temp.txt \
               --write-thumbnail \
               --convert-thumbnails jpg \
@@ -97,21 +92,16 @@ jobs:
             echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
           fi
 
+      # ============================================
+      # دانلود ویدیوهای کوتاه + تامبنیل
+      # ============================================
       - name: Download short videos
         run: |
           set -euo pipefail
 
           if [ -s short_temp.txt ]; then
             mkdir -p downloads/short_videos
-
-            COOKIE_ARGS=()
-            if [ -s cookies.txt ]; then
-              COOKIE_ARGS=(--cookies cookies.txt)
-            fi
-
-            yt-dlp \
-              --js-runtimes node \
-              "${COOKIE_ARGS[@]}" \
+            yt-dlp --cookies cookies.txt \
               --batch-file short_temp.txt \
               --write-thumbnail \
               --convert-thumbnails jpg \
@@ -124,22 +114,26 @@ jobs:
             echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
           fi
 
+      # ============================================
+      # Split videos into chunks under TARGET_MB
+      # re-encode based so output size is actually controlled
+      # ============================================
       - name: Split videos into chunks
         run: |
           set -euo pipefail
 
           TARGET_BYTES=$((TARGET_MB * 1024 * 1024))
+          AUDIO_BITRATE_KBPS=96
+          SAFETY_PERCENT=85
 
           split_video() {
             local input_file="$1"
             [ -f "$input_file" ] || return 0
 
-            local dir base name ext size_bytes duration segment_time attempt parts_count max_part_size part
-
+            local dir base name size_bytes duration parts_needed segment_duration attempt
             dir="$(dirname "$input_file")"
             base="$(basename "$input_file")"
             name="${base%.*}"
-            ext="${base##*.}"
 
             size_bytes="$(stat -c%s "$input_file")"
 
@@ -158,61 +152,77 @@ jobs:
               duration=60
             fi
 
-            segment_time="$(awk -v target="$TARGET_BYTES" -v size="$size_bytes" -v duration="$duration" '
-              BEGIN {
-                t = (target / size) * duration * 0.95
-                if (t < 3) t = 3
-                printf "%.0f", t
-              }
-            ')"
+            parts_needed=$(( (size_bytes + TARGET_BYTES - 1) / TARGET_BYTES ))
+            [ "$parts_needed" -lt 2 ] && parts_needed=2
 
-            if [ -z "${segment_time:-}" ] || [ "$segment_time" -lt 3 ]; then
-              segment_time=3
-            fi
-
-            echo "⚠️ Splitting: $input_file (${size_bytes} bytes) with initial segment_time=${segment_time}s"
+            echo "⚠️ Splitting: $input_file (${size_bytes} bytes), estimated parts: ${parts_needed}"
 
             for attempt in 1 2 3 4 5 6; do
-              rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
+              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
 
-              ffmpeg -hide_banner -loglevel error -y \
-                -i "$input_file" \
-                -map 0 -c copy \
-                -f segment \
-                -segment_time "$segment_time" \
-                -reset_timestamps 1 \
-                "${dir}/${name}_part%03d.${ext}"
+              segment_duration=$(( (duration + parts_needed - 1) / parts_needed ))
+              [ "$segment_duration" -lt 3 ] && segment_duration=3
 
-              parts_count=$(find "$dir" -maxdepth 1 -type f -name "${name}_part*.${ext}" | wc -l | tr -d ' ')
+              local start=0
+              local index=0
+              local all_ok=1
 
-              if [ "$parts_count" -eq 0 ]; then
-                echo "⚠️ هیچ پارت خروجی تولید نشد. کاهش زمان بخش..."
-                segment_time=$((segment_time / 2))
-                [ "$segment_time" -lt 3 ] && segment_time=3
-                continue
-              fi
+              while [ "$start" -lt "$duration" ]; do
+                local part_file part_len target_part_bytes part_vbitrate part_size
 
-              max_part_size=0
-              while IFS= read -r -d '' part; do
-                part_size=$(stat -c%s "$part")
-                if [ "$part_size" -gt "$max_part_size" ]; then
-                  max_part_size="$part_size"
+                part_file="${dir}/${name}_part$(printf '%03d' "$index").mp4"
+                part_len=$segment_duration
+
+                if [ $((start + part_len)) -gt "$duration" ]; then
+                  part_len=$((duration - start))
                 fi
-              done < <(find "$dir" -maxdepth 1 -type f -name "${name}_part*.${ext}" -print0)
 
-              if [ "$max_part_size" -le "$TARGET_BYTES" ]; then
+                [ "$part_len" -lt 1 ] && part_len=1
+
+                target_part_bytes=$(( TARGET_BYTES * SAFETY_PERCENT / 100 ))
+
+                part_vbitrate=$(( (target_part_bytes * 8 / part_len) - (AUDIO_BITRATE_KBPS * 1000) ))
+                [ "$part_vbitrate" -lt 300000 ] && part_vbitrate=300000
+                [ "$part_vbitrate" -gt 12000000 ] && part_vbitrate=12000000
+
+                echo "➡️ Part $((index + 1)): start=${start}s len=${part_len}s bitrate=${part_vbitrate}"
+
+                if ! ffmpeg -hide_banner -loglevel error -y \
+                  -ss "$start" -i "$input_file" -t "$part_len" \
+                  -map 0:v:0 -map 0:a? \
+                  -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+                  -b:v "$part_vbitrate" -maxrate "$part_vbitrate" -bufsize $((part_vbitrate * 2)) \
+                  -c:a aac -b:a "${AUDIO_BITRATE_KBPS}k" \
+                  -movflags +faststart \
+                  "$part_file"; then
+                  all_ok=0
+                  break
+                fi
+
+                part_size=$(stat -c%s "$part_file")
+
+                if [ "$part_size" -gt "$TARGET_BYTES" ]; then
+                  echo "⚠️ Part too large: ${part_size} bytes"
+                  all_ok=0
+                  break
+                fi
+
+                start=$((start + part_len))
+                index=$((index + 1))
+              done
+
+              if [ "$all_ok" -eq 1 ] && ls "${dir}/${name}_part"*.mp4 >/dev/null 2>&1; then
                 echo "✅ Split successful: $input_file"
                 rm -f "$input_file"
                 return 0
               fi
 
-              echo "⚠️ بعضی پارت‌ها هنوز بزرگ‌تر از TARGET_MB هستند. retry با segment_time کوچکتر..."
-              rm -f "${dir}/${name}_part"*".${ext}" 2>/dev/null || true
-              segment_time=$((segment_time * 80 / 100))
-              [ "$segment_time" -lt 3 ] && segment_time=3
+              echo "⚠️ Retry split with more chunks..."
+              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
+              parts_needed=$((parts_needed + 1))
             done
 
-            echo "❌ Split failed to keep parts under ${TARGET_MB}MB: $input_file"
+            echo "❌ Split failed: $input_file"
             exit 1
           }
 
@@ -231,25 +241,9 @@ jobs:
               -print0
           )
 
-      - name: Verify and cleanup oversized originals
-        run: |
-          set -euo pipefail
-
-          while IFS= read -r -d '' video; do
-            size_bytes=$(stat -c%s "$video")
-            if [ "$size_bytes" -gt 104857600 ]; then
-              base="${video%.*}"
-
-              if ls "${base}_part"* >/dev/null 2>&1; then
-                echo "🧹 Removing oversized original: $video"
-                rm -f "$video"
-              else
-                echo "❌ Oversized file still exists and was not split: $video"
-                exit 1
-              fi
-            fi
-          done < <(find downloads -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" -o -iname "*.m4v" \) -print0)
-
+      # ============================================
+      # Generate fallback thumbnails
+      # ============================================
       - name: Generate fallback thumbnails
         run: |
           set -euo pipefail
@@ -283,6 +277,9 @@ jobs:
             create_thumbnail "$dir"
           done
 
+      # ============================================
+      # Build library.json
+      # ============================================
       - name: Build library manifest
         run: |
           python3 << 'PYTHON'
