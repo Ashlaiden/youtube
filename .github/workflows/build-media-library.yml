@@ -70,16 +70,15 @@ jobs:
           echo "✅ لینک‌های بلند استخراج شده: $(wc -l < long_temp.txt | tr -d ' ') عدد"
           echo "✅ لینک‌های کوتاه استخراج شده: $(wc -l < short_temp.txt | tr -d ' ') عدد"
 
-      # ============================================
-      # دانلود ویدیوهای بلند + تامبنیل
-      # ============================================
       - name: Download long videos
         run: |
           set -euo pipefail
 
           if [ -s long_temp.txt ]; then
             mkdir -p downloads/long_videos
-            yt-dlp --cookies cookies.txt \
+            yt-dlp \
+              --js-runtimes node \
+              --cookies cookies.txt \
               --batch-file long_temp.txt \
               --write-thumbnail \
               --convert-thumbnails jpg \
@@ -92,16 +91,15 @@ jobs:
             echo "⏩ هیچ لینک بلندی برای دانلود وجود ندارد."
           fi
 
-      # ============================================
-      # دانلود ویدیوهای کوتاه + تامبنیل
-      # ============================================
       - name: Download short videos
         run: |
           set -euo pipefail
 
           if [ -s short_temp.txt ]; then
             mkdir -p downloads/short_videos
-            yt-dlp --cookies cookies.txt \
+            yt-dlp \
+              --js-runtimes node \
+              --cookies cookies.txt \
               --batch-file short_temp.txt \
               --write-thumbnail \
               --convert-thumbnails jpg \
@@ -114,10 +112,6 @@ jobs:
             echo "⏩ هیچ لینک کوتاهی برای دانلود وجود ندارد."
           fi
 
-      # ============================================
-      # Split videos into chunks under TARGET_MB
-      # re-encode based so output size is actually controlled
-      # ============================================
       - name: Split videos into chunks
         run: |
           set -euo pipefail
@@ -241,9 +235,6 @@ jobs:
               -print0
           )
 
-      # ============================================
-      # Generate fallback thumbnails
-      # ============================================
       - name: Generate fallback thumbnails
         run: |
           set -euo pipefail
@@ -277,9 +268,6 @@ jobs:
             create_thumbnail "$dir"
           done
 
-      # ============================================
-      # Build library.json
-      # ============================================
       - name: Build library manifest
         run: |
           python3 << 'PYTHON'
