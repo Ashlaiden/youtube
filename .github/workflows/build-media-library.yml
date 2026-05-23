@@ -1,417 +1,249 @@
-name: ci
+name: Download And Publish Media
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  download:
     runs-on: ubuntu-latest
 
-    env:
-      TARGET_MB: "19"
-
     steps:
-      - name: Clone repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
+      - name: Install packages
         run: |
+          set -euo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y ffmpeg bc python3 python3-pip
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -U "yt-dlp[default]"
 
-      - name: Create cookies file from Secret
+          sudo apt-get install -y \
+            ffmpeg \
+            jq \
+            python3 \
+            python3-pip
+
+          python3 -m pip install --upgrade yt-dlp
+
+      - name: Prepare folders
         run: |
-          if [ -n "${{ secrets.YT_COOKIES }}" ]; then
-            printf '%s\n' "${{ secrets.YT_COOKIES }}" > cookies.txt
+          mkdir -p downloads/short_videos
+          mkdir -p downloads/long_videos
+          mkdir -p assets
 
-            if [ ! -s cookies.txt ]; then
-              echo "❌ cookies.txt is empty"
-              exit 1
+      - name: Download videos
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          set -euo pipefail
+
+          cat > cookies.txt <<< "$YT_COOKIES"
+
+          sanitize_filename() {
+            echo "$1" \
+              | sed 's/[<>:"\/\\|?*]//g' \
+              | sed 's/  */ /g' \
+              | sed 's/^ *//;s/ *$//'
+          }
+
+          download_video() {
+            local url="$1"
+            local type="$2"
+
+            local base_dir
+
+            if [ "$type" = "short" ]; then
+              base_dir="downloads/short_videos"
+            else
+              base_dir="downloads/long_videos"
             fi
-          fi
-
-      - name: Split playlist into temporary files
-        run: |
-          set -euo pipefail
-
-          rm -f long_temp.txt short_temp.txt
-          : > long_temp.txt
-          : > short_temp.txt
-
-          awk '
-            BEGIN { mode = "" }
-
-            /^[[:space:]]*#long[[:space:]]*$/ {
-              mode = "long"
-              next
-            }
-
-            /^[[:space:]]*#short[[:space:]]*$/ {
-              mode = "short"
-              next
-            }
-
-            /^[[:space:]]*#/ { next }
-            NF == 0 { next }
-
-            {
-              gsub(/\r$/, "")
-
-              if (mode == "long")
-                print >> "long_temp.txt"
-
-              if (mode == "short")
-                print >> "short_temp.txt"
-            }
-          ' playlist.txt
-
-          echo "Long videos: $(wc -l < long_temp.txt)"
-          echo "Short videos: $(wc -l < short_temp.txt)"
-
-      - name: Download long videos
-        run: |
-          set -euo pipefail
-
-          if [ -s long_temp.txt ]; then
-            mkdir -p downloads/long_videos
 
             yt-dlp \
-              --js-runtimes node \
               --cookies cookies.txt \
-              --batch-file long_temp.txt \
-              --continue \
-              --restrict-filenames \
+              --no-playlist \
               --merge-output-format mp4 \
+              --format "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b" \
+              --embed-metadata \
               --write-thumbnail \
               --convert-thumbnails jpg \
-              --output "downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s" \
-              --output "thumbnail:downloads/long_videos/%(title)s/%(title)s_%(id)s.%(ext)s"
-          else
-            echo "No long videos"
+              --output "${base_dir}/%(title)s/%(title)s_%(id)s.%(ext)s" \
+              "$url"
+          }
+
+          if [ -f long_videos.txt ]; then
+            while IFS= read -r url || [ -n "$url" ]; do
+              [ -z "$url" ] && continue
+              download_video "$url" "long"
+            done < long_videos.txt
           fi
 
-      - name: Download short videos
-        run: |
-          set -euo pipefail
-
-          if [ -s short_temp.txt ]; then
-            mkdir -p downloads/short_videos
-
-            yt-dlp \
-              --js-runtimes node \
-              --cookies cookies.txt \
-              --batch-file short_temp.txt \
-              --continue \
-              --restrict-filenames \
-              --merge-output-format mp4 \
-              --write-thumbnail \
-              --convert-thumbnails jpg \
-              --output "downloads/short_videos/%(title)s_%(id)s.%(ext)s" \
-              --output "thumbnail:downloads/short_videos/%(title)s_%(id)s.%(ext)s"
-          else
-            echo "No short videos"
+          if [ -f short_videos.txt ]; then
+            while IFS= read -r url || [ -n "$url" ]; do
+              [ -z "$url" ] && continue
+              download_video "$url" "short"
+            done < short_videos.txt
           fi
 
       - name: Split oversized videos
         run: |
           set -euo pipefail
 
+          TARGET_MB=95
           TARGET_BYTES=$((TARGET_MB * 1024 * 1024))
-          AUDIO_BITRATE_KBPS=96
-          SAFETY_PERCENT=85
 
-          split_video() {
-            local input_file="$1"
+          AUDIO_BITRATE_KBPS=128
 
-            [ -f "$input_file" ] || return 0
+          find downloads -type f -name "*.mp4" | while read -r input_file; do
 
-            local dir
-            local base
-            local name
-            local size_bytes
-            local duration
-            local parts_needed
-            local segment_duration
+            file_size=$(stat -c%s "$input_file")
 
-            dir="$(dirname "$input_file")"
-            base="$(basename "$input_file")"
-            name="${base%.*}"
-
-            size_bytes="$(stat -c%s "$input_file")"
-
-            if [ "$size_bytes" -le "$TARGET_BYTES" ]; then
+            if [ "$file_size" -le "$TARGET_BYTES" ]; then
               echo "✅ No split needed: $input_file"
-              return 0
+              continue
             fi
 
-            duration="$(ffprobe \
+            echo "⚠️ Splitting: $input_file ($file_size bytes)"
+
+            duration=$(ffprobe \
               -v error \
               -show_entries format=duration \
               -of default=noprint_wrappers=1:nokey=1 \
-              "$input_file" | awk '{print int($1+0.5)}')"
+              "$input_file")
 
-            if [ -z "${duration:-}" ] || [ "$duration" -le 0 ]; then
-              duration=60
+            duration=${duration%.*}
+
+            if [ -z "$duration" ] || [ "$duration" -le 0 ]; then
+              echo "❌ Could not detect duration"
+              exit 1
             fi
 
-            parts_needed=$(( (size_bytes + TARGET_BYTES - 1) / TARGET_BYTES ))
+            total_bitrate=$(( file_size * 8 / duration ))
 
-            [ "$parts_needed" -lt 2 ] && parts_needed=2
+            target_part_bytes=$(( TARGET_BYTES - (2 * 1024 * 1024) ))
 
-            echo "⚠️ Splitting: $input_file (${size_bytes} bytes)"
+            estimated_parts=$(( (file_size + target_part_bytes - 1) / target_part_bytes ))
 
-            for attempt in 1 2 3 4 5 6; do
+            if [ "$estimated_parts" -lt 2 ]; then
+              estimated_parts=2
+            fi
 
-              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
+            segment_time=$(( duration / estimated_parts ))
 
-              segment_duration=$(( (duration + parts_needed - 1) / parts_needed ))
+            if [ "$segment_time" -lt 5 ]; then
+              segment_time=5
+            fi
 
-              [ "$segment_duration" -lt 3 ] && segment_duration=3
+            basename_noext="${input_file%.mp4}"
 
-              local start=0
-              local index=0
-              local all_ok=1
+            rm -f "${basename_noext}"_part*.mp4
 
-              while [ "$start" -lt "$duration" ]; do
+            start=0
+            part=0
 
-                local part_file
-                local part_len
-                local target_part_bytes
-                local part_vbitrate
-                local part_size
+            while [ "$start" -lt "$duration" ]; do
 
-                part_file="${dir}/${name}_part$(printf '%03d' "$index").mp4"
+              part_len="$segment_time"
 
-                part_len=$segment_duration
+              remaining=$(( duration - start ))
 
-                if [ $((start + part_len)) -gt "$duration" ]; then
-                  part_len=$((duration - start))
-                fi
-
-                [ "$part_len" -lt 1 ] && part_len=1
-
-                target_part_bytes=$(( TARGET_BYTES * SAFETY_PERCENT / 100 ))
-
-                part_vbitrate=$(( (target_part_bytes * 8 / part_len) - (AUDIO_BITRATE_KBPS * 1000) ))
-
-                [ "$part_vbitrate" -lt 300000 ] && part_vbitrate=300000
-                [ "$part_vbitrate" -gt 12000000 ] && part_vbitrate=12000000
-
-                echo "➡️ Part $((index + 1)): start=${start}s len=${part_len}s bitrate=${part_vbitrate}"
-
-                if ! ffmpeg \
-                  -nostdin \
-                  -hide_banner \
-                  -loglevel error \
-                  -y \
-                  -ss "$start" \
-                  -i "$input_file" \
-                  -t "$part_len" \
-                  -map 0:v:0 \
-                  -map 0:a? \
-                  -c:v libx264 \
-                  -preset veryfast \
-                  -pix_fmt yuv420p \
-                  -b:v "$part_vbitrate" \
-                  -maxrate "$part_vbitrate" \
-                  -bufsize $((part_vbitrate * 2)) \
-                  -c:a aac \
-                  -b:a "${AUDIO_BITRATE_KBPS}k" \
-                  -movflags +faststart \
-                  "$part_file"; then
-
-                  all_ok=0
-                  break
-                fi
-
-                part_size=$(stat -c%s "$part_file")
-
-                if [ "$part_size" -gt "$TARGET_BYTES" ]; then
-                  echo "⚠️ Part too large: $part_size bytes"
-                  all_ok=0
-                  break
-                fi
-
-                start=$((start + part_len))
-                index=$((index + 1))
-              done
-
-              if [ "$all_ok" -eq 1 ] && ls "${dir}/${name}_part"*.mp4 >/dev/null 2>&1; then
-                echo "✅ Split successful: $input_file"
-
-                rm -f "$input_file"
-
-                return 0
+              if [ "$remaining" -lt "$part_len" ]; then
+                part_len="$remaining"
               fi
 
-              echo "⚠️ Retry split..."
+              part_file=$(printf "%s_part%03d.mp4" "$basename_noext" "$part")
 
-              rm -f "${dir}/${name}_part"*.mp4 2>/dev/null || true
+              part_vbitrate=$(( (target_part_bytes * 8 / part_len) - (AUDIO_BITRATE_KBPS * 1000) ))
 
-              parts_needed=$((parts_needed + 1))
+              if [ "$part_vbitrate" -lt 300000 ]; then
+                part_vbitrate=300000
+              fi
+
+              echo "➡️ Part $((part + 1)): start=${start}s len=${part_len}s bitrate=${part_vbitrate}"
+
+              ffmpeg \
+                -nostdin \
+                -hide_banner \
+                -loglevel error \
+                -y \
+                -ss "$start" \
+                -i "$input_file" \
+                -t "$part_len" \
+                -map 0:v:0 \
+                -map 0:a? \
+                -c:v libx264 \
+                -preset ultrafast \
+                -threads 0 \
+                -pix_fmt yuv420p \
+                -b:v "$part_vbitrate" \
+                -maxrate "$part_vbitrate" \
+                -bufsize $((part_vbitrate * 2)) \
+                -c:a aac \
+                -b:a "${AUDIO_BITRATE_KBPS}k" \
+                -movflags +faststart \
+                "$part_file"
+
+              new_size=$(stat -c%s "$part_file")
+
+              if [ "$new_size" -gt "$TARGET_BYTES" ]; then
+                echo "❌ Split part still oversized: $part_file"
+                exit 1
+              fi
+
+              start=$(( start + part_len ))
+              part=$(( part + 1 ))
+
             done
 
-            echo "❌ Split failed: $input_file"
-            exit 1
-          }
+            rm -f "$input_file"
 
-          while IFS= read -r -d '' video; do
-
-            case "$video" in
-              *_part*.mp4)
-                continue
-                ;;
-            esac
-
-            split_video "$video"
-
-          done < <(
-            find downloads \
-              -type f \
-              -iname "*.mp4" \
-              -print0
-          )
-
-      - name: Generate thumbnails if missing
-        run: |
-          set -euo pipefail
-
-          create_thumbnail() {
-            local folder="$1"
-
-            local existing_thumb
-            local video
-
-            existing_thumb="$(find "$folder" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) | head -n 1 || true)"
-
-            if [ -n "$existing_thumb" ]; then
-              return 0
-            fi
-
-            video="$(find "$folder" -maxdepth 1 -type f -iname "*.mp4" ! -name "*_part*" | head -n 1 || true)"
-
-            if [ -z "$video" ]; then
-              return 0
-            fi
-
-            ffmpeg \
-              -nostdin \
-              -hide_banner \
-              -loglevel error \
-              -y \
-              -ss 00:00:01 \
-              -i "$video" \
-              -frames:v 1 \
-              -q:v 2 \
-              "$folder/thumbnail.jpg" || true
-          }
-
-          find downloads/long_videos downloads/short_videos \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d | while read -r dir; do
-
-            create_thumbnail "$dir"
+            echo "✅ Split successful: $input_file"
 
           done
 
-      - name: Build library manifest
-        run: |
-          python3 << 'PYTHON'
-          import json
-          import re
-          from pathlib import Path
-
-          ROOT = Path("downloads")
-
-          def part_sort_key(path):
-              m = re.search(r"_part(\d+)", path.stem)
-              return int(m.group(1)) if m else 999999
-
-          def scan_section(section):
-              section_dir = ROOT / section
-
-              if not section_dir.exists():
-                  return []
-
-              items = []
-
-              for folder in sorted(section_dir.iterdir(), key=lambda p: p.name.lower()):
-
-                  if not folder.is_dir():
-                      continue
-
-                  files = list(folder.iterdir())
-
-                  thumbnail = next(
-                      (
-                          f for f in files
-                          if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
-                      ),
-                      None
-                  )
-
-                  full_video = next(
-                      (
-                          f for f in files
-                          if f.suffix.lower() == ".mp4"
-                          and "_part" not in f.stem
-                      ),
-                      None
-                  )
-
-                  parts = sorted(
-                      [
-                          f for f in files
-                          if f.suffix.lower() == ".mp4"
-                          and "_part" in f.stem
-                      ],
-                      key=part_sort_key
-                  )
-
-                  items.append({
-                      "id": folder.name,
-                      "title": folder.name,
-                      "thumbnail": str(thumbnail).replace("\\", "/") if thumbnail else None,
-                      "full": str(full_video).replace("\\", "/") if full_video else None,
-                      "parts": [str(p).replace("\\", "/") for p in parts]
-                  })
-
-              return items
-
-          manifest = {
-              "sections": {
-                  "long": scan_section("long_videos"),
-                  "short": scan_section("short_videos")
-              }
-          }
-
-          Path("assets").mkdir(exist_ok=True)
-
-          with open("assets/library.json", "w", encoding="utf-8") as f:
-              json.dump(manifest, f, ensure_ascii=False, indent=2)
-          PYTHON
-
-      - name: Commit and push changes
+      - name: Generate library.json
         run: |
           set -euo pipefail
 
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          python3 << 'PYTHON'
+          import os
+          import json
 
-          git add downloads assets/library.json
+          library = []
+
+          for root, dirs, files in os.walk("downloads"):
+              for file in files:
+                  if file.endswith(".mp4"):
+                      full_path = os.path.join(root, file)
+
+                      preview = None
+
+                      for x in files:
+                          if x.endswith(".jpg"):
+                              preview = os.path.join(root, x).replace("\\", "/")
+                              break
+
+                      library.append({
+                          "video": full_path.replace("\\", "/"),
+                          "preview": preview
+                      })
+
+          with open("assets/library.json", "w", encoding="utf-8") as f:
+              json.dump(library, f, ensure_ascii=False, indent=2)
+          PYTHON
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
 
           if git diff --cached --quiet; then
             echo "No changes"
@@ -419,4 +251,5 @@ jobs:
           fi
 
           git commit -m "Update media library"
+
           git push
