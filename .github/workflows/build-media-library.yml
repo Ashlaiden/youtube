@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      TARGET_MB: "19"
+      TARGET_MB: "90"
 
     steps:
       - name: Clone repository
